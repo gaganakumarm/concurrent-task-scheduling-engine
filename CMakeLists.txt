@@ -31,6 +31,7 @@ endfunction()
 add_library(
     concurrent_scheduler_core
     src/concurrent_scheduler.c
+    src/concurrent_task_queue.c
     src/task.c
     src/task_queue.c
 )
@@ -121,3 +122,98 @@ add_test(
     NAME concurrent_scheduler.task_queue
     COMMAND concurrent_scheduler_task_queue_tests
 )
+
+if(WIN32)
+    add_library(
+        concurrent_scheduler_platform_sync
+        STATIC
+        src/platform/windows/sync_windows.c
+    )
+
+    target_include_directories(
+        concurrent_scheduler_platform_sync
+        PRIVATE
+            "${PROJECT_SOURCE_DIR}/src/platform"
+    )
+
+    target_compile_definitions(
+        concurrent_scheduler_platform_sync
+        PRIVATE
+            WIN32_LEAN_AND_MEAN
+            NOMINMAX
+    )
+
+    concurrent_scheduler_enable_warnings(
+        concurrent_scheduler_platform_sync
+    )
+
+    target_include_directories(
+        concurrent_scheduler_core
+        PRIVATE
+            "${PROJECT_SOURCE_DIR}/src"
+    )
+
+    target_link_libraries(
+        concurrent_scheduler_core
+        PRIVATE
+            concurrent_scheduler_platform_sync
+    )
+
+    add_executable(
+        concurrent_scheduler_synchronization_backend_tests
+        tests/synchronization_backend_test.c
+    )
+
+    target_include_directories(
+        concurrent_scheduler_synchronization_backend_tests
+        PRIVATE
+            "${PROJECT_SOURCE_DIR}/src/platform"
+    )
+
+    target_link_libraries(
+        concurrent_scheduler_synchronization_backend_tests
+        PRIVATE
+            concurrent_scheduler_platform_sync
+    )
+
+    concurrent_scheduler_enable_warnings(
+        concurrent_scheduler_synchronization_backend_tests
+    )
+
+    add_test(
+        NAME concurrent_scheduler.synchronization_backend
+        COMMAND concurrent_scheduler_synchronization_backend_tests
+    )
+
+    add_executable(
+        concurrent_scheduler_concurrent_task_queue_tests
+        tests/test_concurrent_task_queue.c
+    )
+
+    target_include_directories(
+        concurrent_scheduler_concurrent_task_queue_tests
+        PRIVATE
+            "${PROJECT_SOURCE_DIR}/src/platform"
+    )
+
+    target_link_libraries(
+        concurrent_scheduler_concurrent_task_queue_tests
+        PRIVATE
+            concurrent_scheduler_core
+            concurrent_scheduler_platform_sync
+    )
+
+    concurrent_scheduler_enable_warnings(
+        concurrent_scheduler_concurrent_task_queue_tests
+    )
+
+    add_test(
+        NAME concurrent_scheduler.concurrent_task_queue
+        COMMAND concurrent_scheduler_concurrent_task_queue_tests
+    )
+else()
+    message(
+        FATAL_ERROR
+        "No synchronization backend is available for this platform."
+    )
+endif()
