@@ -32,6 +32,7 @@ add_library(
     concurrent_scheduler_core
     src/concurrent_scheduler.c
     src/concurrent_task_queue.c
+    src/scheduler.c
     src/task.c
     src/task_queue.c
 )
@@ -210,6 +211,33 @@ if(WIN32)
     add_test(
         NAME concurrent_scheduler.concurrent_task_queue
         COMMAND concurrent_scheduler_concurrent_task_queue_tests
+    )
+
+    add_executable(
+        concurrent_scheduler_scheduler_tests
+        tests/test_scheduler.c
+    )
+
+    target_include_directories(
+        concurrent_scheduler_scheduler_tests
+        PRIVATE
+            "${PROJECT_SOURCE_DIR}/src/platform"
+    )
+
+    target_link_libraries(
+        concurrent_scheduler_scheduler_tests
+        PRIVATE
+            concurrent_scheduler_core
+            concurrent_scheduler_platform_sync
+    )
+
+    concurrent_scheduler_enable_warnings(
+        concurrent_scheduler_scheduler_tests
+    )
+
+    add_test(
+        NAME concurrent_scheduler.scheduler
+        COMMAND concurrent_scheduler_scheduler_tests
     )
 else()
     message(
