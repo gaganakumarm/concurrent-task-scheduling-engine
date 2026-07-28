@@ -33,7 +33,9 @@ enum {
     INTEGRATION_CONSUMER_COUNT = 2,
     INTEGRATION_TASKS_PER_PRODUCER = 8,
     INTEGRATION_TOTAL_TASKS =
-        INTEGRATION_PRODUCER_COUNT * INTEGRATION_TASKS_PER_PRODUCER
+        INTEGRATION_PRODUCER_COUNT * INTEGRATION_TASKS_PER_PRODUCER,
+    SHUTDOWN_AUDIT_PRODUCER_COUNT = 3,
+    SHUTDOWN_AUDIT_CONSUMER_COUNT = 4
 };
 
 typedef struct {
@@ -146,6 +148,42 @@ typedef struct {
     ConcurrentTaskQueueResult result;
     bool executed;
 } HandoffContext;
+
+typedef struct {
+    SchedMutex mutex;
+    SchedCondition condition;
+    int ready;
+    int released;
+    int completed;
+    bool aborted;
+} OrderedConsumerGate;
+
+typedef struct {
+    ConcurrentTaskQueue *queue;
+    OrderedConsumerGate *gate;
+    int index;
+    Task *output;
+    ConcurrentTaskQueueResult result;
+    bool executed;
+} OrderedConsumerContext;
+
+typedef struct {
+    ConcurrentTaskQueue *queue;
+    Task *tasks;
+    size_t count;
+    IntegrationBarrier *barrier;
+    ConcurrentTaskQueueResult result;
+    bool executed;
+} ShutdownStressProducerContext;
+
+typedef struct {
+    ConcurrentTaskQueue *queue;
+    TaskRecorder *recorder;
+    IntegrationBarrier *barrier;
+    ConcurrentTaskQueueResult final_result;
+    size_t success_count;
+    bool executed;
+} ShutdownStressConsumerContext;
 
 static int query_worker(void *argument)
 {
@@ -564,6 +602,108 @@ static int handoff_consumer_worker(void *argument)
     return BLOCKING_CONSUMER_RESULT;
 }
 
+static int ordered_shutdown_consumer_worker(void *argument)
+{
+    OrderedConsumerContext *context = argument;
+
+    if (sched_mutex_lock(&context->gate->mutex) != SCHED_SYNC_OK) {
+        return EXIT_FAILURE;
+    }
+    context->gate->ready++;
+    if (sched_condition_broadcast(&context->gate->condition)
+        != SCHED_SYNC_OK) {
+        (void)sched_mutex_unlock(&context->gate->mutex);
+        return EXIT_FAILURE;
+    }
+    while (!context->gate->aborted
+        && context->gate->released <= context->index) {
+        if (sched_condition_wait(
+                &context->gate->condition,
+                &context->gate->mutex
+            ) != SCHED_SYNC_OK) {
+            (void)sched_mutex_unlock(&context->gate->mutex);
+            return EXIT_FAILURE;
+        }
+    }
+    if (context->gate->aborted) {
+        (void)sched_mutex_unlock(&context->gate->mutex);
+        return EXIT_FAILURE;
+    }
+    if (sched_mutex_unlock(&context->gate->mutex) != SCHED_SYNC_OK) {
+        return EXIT_FAILURE;
+    }
+
+    context->result = concurrent_task_queue_dequeue(
+        context->queue,
+        &context->output
+    );
+
+    if (sched_mutex_lock(&context->gate->mutex) != SCHED_SYNC_OK) {
+        return EXIT_FAILURE;
+    }
+    context->gate->completed++;
+    if (sched_condition_broadcast(&context->gate->condition)
+        != SCHED_SYNC_OK) {
+        (void)sched_mutex_unlock(&context->gate->mutex);
+        return EXIT_FAILURE;
+    }
+    if (sched_mutex_unlock(&context->gate->mutex) != SCHED_SYNC_OK) {
+        return EXIT_FAILURE;
+    }
+
+    context->executed = true;
+    return BLOCKING_CONSUMER_RESULT;
+}
+
+static int shutdown_stress_producer_worker(void *argument)
+{
+    ShutdownStressProducerContext *context = argument;
+    size_t index;
+
+    if (integration_barrier_wait(context->barrier) != EXIT_SUCCESS) {
+        return EXIT_FAILURE;
+    }
+    for (index = 0U; index < context->count; index++) {
+        context->result = concurrent_task_queue_enqueue(
+            context->queue,
+            &context->tasks[index]
+        );
+        if (context->result != CONCURRENT_TASK_QUEUE_OK) {
+            return EXIT_FAILURE;
+        }
+    }
+    context->executed = true;
+    return BLOCKING_THREAD_RESULT;
+}
+
+static int shutdown_stress_consumer_worker(void *argument)
+{
+    ShutdownStressConsumerContext *context = argument;
+    Task *task = NULL;
+
+    if (integration_barrier_wait(context->barrier) != EXIT_SUCCESS) {
+        return EXIT_FAILURE;
+    }
+    for (;;) {
+        context->final_result = concurrent_task_queue_dequeue(
+            context->queue,
+            &task
+        );
+        if (context->final_result
+            == CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN) {
+            break;
+        }
+        if (context->final_result != CONCURRENT_TASK_QUEUE_OK
+            || task == NULL
+            || record_task(context->recorder, task) != EXIT_SUCCESS) {
+            return EXIT_FAILURE;
+        }
+        context->success_count++;
+    }
+    context->executed = true;
+    return BLOCKING_CONSUMER_RESULT;
+}
+
 static int test_public_api(void)
 {
     ConcurrentTaskQueue queue = {0};
@@ -603,6 +743,8 @@ static int test_public_api(void)
         ConcurrentTaskQueue *,
         Task **
     ) = concurrent_task_queue_dequeue;
+    ConcurrentTaskQueueResult (*shutdown_function)(ConcurrentTaskQueue *) =
+        concurrent_task_queue_shutdown;
 
     if (queue.implementation != NULL
         || init_function == NULL
@@ -616,7 +758,8 @@ static int test_public_api(void)
         || dequeue_function == NULL
         || peek_function == NULL
         || blocking_enqueue_function == NULL
-        || blocking_dequeue_function == NULL) {
+        || blocking_dequeue_function == NULL
+        || shutdown_function == NULL) {
         fprintf(stderr, "CONCURRENT-API-001 through 004 failed.\n");
         return EXIT_FAILURE;
     }
@@ -3130,6 +3273,828 @@ cleanup:
     return status;
 }
 
+static int test_shutdown_basic_and_drain(void)
+{
+    ConcurrentTaskQueue uninitialized = {0};
+    ConcurrentTaskQueue empty_queue = {0};
+    ConcurrentTaskQueue queue = {0};
+    Task tasks[4];
+    Task snapshots[4];
+    Task sentinel;
+    Task *output = &sentinel;
+    size_t index;
+    int status = EXIT_FAILURE;
+
+    if (initialize_tasks(tasks, snapshots, 4U) != EXIT_SUCCESS
+        || !task_init(&sentinel, 9900U, TASK_PRIORITY_LOW, 1U)
+        || concurrent_task_queue_shutdown(NULL)
+            != CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT
+        || concurrent_task_queue_shutdown(&uninitialized)
+            != CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT
+        || concurrent_task_queue_init(&empty_queue, 1U)
+            != CONCURRENT_TASK_QUEUE_OK
+        || concurrent_task_queue_shutdown(&empty_queue)
+            != CONCURRENT_TASK_QUEUE_OK
+        || concurrent_task_queue_shutdown(&empty_queue)
+            != CONCURRENT_TASK_QUEUE_OK
+        || concurrent_task_queue_try_enqueue(&empty_queue, &tasks[0])
+            != CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN
+        || concurrent_task_queue_enqueue(&empty_queue, &tasks[0])
+            != CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN
+        || concurrent_task_queue_try_dequeue(&empty_queue, &output)
+            != CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN
+        || output != &sentinel
+        || concurrent_task_queue_dequeue(&empty_queue, &output)
+            != CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN
+        || output != &sentinel
+        || concurrent_task_queue_try_peek(&empty_queue, &output)
+            != CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN
+        || output != &sentinel
+        || !concurrent_task_queue_is_empty(&empty_queue)
+        || concurrent_task_queue_is_full(&empty_queue)
+        || concurrent_task_queue_size(&empty_queue) != 0U
+        || concurrent_task_queue_capacity(&empty_queue) != 1U) {
+        goto cleanup;
+    }
+    concurrent_task_queue_destroy(&empty_queue);
+
+    if (concurrent_task_queue_init(&queue, 4U)
+            != CONCURRENT_TASK_QUEUE_OK
+        || concurrent_task_queue_try_enqueue(&queue, &tasks[0])
+            != CONCURRENT_TASK_QUEUE_OK
+        || concurrent_task_queue_enqueue(&queue, &tasks[1])
+            != CONCURRENT_TASK_QUEUE_OK
+        || concurrent_task_queue_try_enqueue(&queue, &tasks[2])
+            != CONCURRENT_TASK_QUEUE_OK
+        || concurrent_task_queue_try_peek(&queue, &output)
+            != CONCURRENT_TASK_QUEUE_OK
+        || output != &tasks[0]
+        || concurrent_task_queue_shutdown(&queue)
+            != CONCURRENT_TASK_QUEUE_OK
+        || concurrent_task_queue_shutdown(&queue)
+            != CONCURRENT_TASK_QUEUE_OK
+        || concurrent_task_queue_try_enqueue(&queue, &tasks[3])
+            != CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN
+        || concurrent_task_queue_enqueue(&queue, &tasks[3])
+            != CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN
+        || concurrent_task_queue_size(&queue) != 3U
+        || concurrent_task_queue_capacity(&queue) != 4U
+        || concurrent_task_queue_is_empty(&queue)
+        || concurrent_task_queue_is_full(&queue)
+        || concurrent_task_queue_try_peek(&queue, &output)
+            != CONCURRENT_TASK_QUEUE_OK
+        || output != &tasks[0]
+        || concurrent_task_queue_try_dequeue(&queue, &output)
+            != CONCURRENT_TASK_QUEUE_OK
+        || output != &tasks[0]
+        || concurrent_task_queue_dequeue(&queue, &output)
+            != CONCURRENT_TASK_QUEUE_OK
+        || output != &tasks[1]
+        || concurrent_task_queue_try_dequeue(&queue, &output)
+            != CONCURRENT_TASK_QUEUE_OK
+        || output != &tasks[2]
+        || !concurrent_task_queue_is_empty(&queue)
+        || concurrent_task_queue_is_full(&queue)
+        || concurrent_task_queue_size(&queue) != 0U
+        || concurrent_task_queue_capacity(&queue) != 4U) {
+        goto cleanup;
+    }
+
+    output = &sentinel;
+    if (concurrent_task_queue_try_dequeue(&queue, &output)
+            != CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN
+        || output != &sentinel
+        || concurrent_task_queue_dequeue(&queue, &output)
+            != CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN
+        || output != &sentinel
+        || concurrent_task_queue_try_peek(&queue, &output)
+            != CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN
+        || output != &sentinel
+        || memcmp(tasks, snapshots, sizeof(tasks)) != 0) {
+        goto cleanup;
+    }
+
+    for (index = 0U; index < 4U; index++) {
+        if (memcmp(&tasks[index], &snapshots[index], sizeof(tasks[index]))
+            != 0) {
+            goto cleanup;
+        }
+    }
+    status = EXIT_SUCCESS;
+
+cleanup:
+    concurrent_task_queue_destroy(&queue);
+    concurrent_task_queue_destroy(&empty_queue);
+    if (status == EXIT_SUCCESS) {
+        printf(
+            "SHUTDOWN-001 through -005, -008 through -011, "
+            "and -014 through -023 and -025 passed.\n"
+        );
+    }
+    return status;
+}
+
+static int test_shutdown_blocked_producers(int waiter_count)
+{
+    ConcurrentTaskQueue queue = {0};
+    Task tasks[1 + BLOCKING_PRODUCER_COUNT];
+    Task snapshots[1 + BLOCKING_PRODUCER_COUNT];
+    BlockingTestSync sync = {{0}, {0}, 0, 0};
+    BlockingProducerContext contexts[BLOCKING_PRODUCER_COUNT] = {0};
+    SchedThread threads[BLOCKING_PRODUCER_COUNT] = {0};
+    Task *output = NULL;
+    bool sync_initialized = false;
+    int created = 0;
+    int joined = 0;
+    int index;
+    int thread_result;
+    int status = EXIT_FAILURE;
+
+    if (waiter_count < 1 || waiter_count > BLOCKING_PRODUCER_COUNT
+        || initialize_tasks(
+            tasks,
+            snapshots,
+            (size_t)(1 + waiter_count)
+        ) != EXIT_SUCCESS
+        || concurrent_task_queue_init(&queue, 1U)
+            != CONCURRENT_TASK_QUEUE_OK
+        || blocking_sync_init(&sync) != EXIT_SUCCESS) {
+        concurrent_task_queue_destroy(&queue);
+        return EXIT_FAILURE;
+    }
+    sync_initialized = true;
+
+    if (concurrent_task_queue_try_enqueue(&queue, &tasks[0])
+        != CONCURRENT_TASK_QUEUE_OK) {
+        goto cleanup;
+    }
+
+    for (index = 0; index < waiter_count; index++) {
+        contexts[index].queue = &queue;
+        contexts[index].task = &tasks[1 + index];
+        contexts[index].sync = &sync;
+        if (sched_thread_create(
+                &threads[index],
+                blocking_producer_worker,
+                &contexts[index]
+            ) != SCHED_SYNC_OK) {
+            goto cleanup;
+        }
+        created++;
+    }
+
+    if (blocking_sync_wait_for(&sync, &sync.started, waiter_count)
+            != EXIT_SUCCESS
+        || sched_mutex_lock(&sync.mutex) != SCHED_SYNC_OK) {
+        goto cleanup;
+    }
+    if (sync.completed != 0) {
+        (void)sched_mutex_unlock(&sync.mutex);
+        goto cleanup;
+    }
+    if (sched_mutex_unlock(&sync.mutex) != SCHED_SYNC_OK
+        || concurrent_task_queue_shutdown(&queue)
+            != CONCURRENT_TASK_QUEUE_OK
+        || blocking_sync_wait_for(&sync, &sync.completed, waiter_count)
+            != EXIT_SUCCESS) {
+        goto cleanup;
+    }
+
+    for (index = 0; index < created; index++) {
+        thread_result = 0;
+        if (sched_thread_join(&threads[index], &thread_result)
+                != SCHED_SYNC_OK
+            || thread_result != BLOCKING_THREAD_RESULT
+            || !contexts[index].executed
+            || contexts[index].result
+                != CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN) {
+            goto cleanup;
+        }
+        joined++;
+    }
+
+    if (concurrent_task_queue_size(&queue) != 1U
+        || !concurrent_task_queue_is_full(&queue)
+        || concurrent_task_queue_try_dequeue(&queue, &output)
+            != CONCURRENT_TASK_QUEUE_OK
+        || output != &tasks[0]
+        || concurrent_task_queue_try_dequeue(&queue, &output)
+            != CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN
+        || memcmp(
+            tasks,
+            snapshots,
+            (size_t)(1 + waiter_count) * sizeof(tasks[0])
+        ) != 0) {
+        goto cleanup;
+    }
+    status = EXIT_SUCCESS;
+
+cleanup:
+    if (created > joined) {
+        (void)concurrent_task_queue_shutdown(&queue);
+        (void)blocking_sync_wait_for(&sync, &sync.completed, created);
+    }
+    for (index = joined; index < created; index++) {
+        (void)sched_thread_join(&threads[index], &thread_result);
+    }
+    for (index = 0; index < created; index++) {
+        sched_thread_destroy(&threads[index]);
+    }
+    if (sync_initialized) {
+        blocking_sync_destroy(&sync);
+    }
+    concurrent_task_queue_destroy(&queue);
+    if (status == EXIT_SUCCESS) {
+        printf(
+            waiter_count == 1
+                ? "SHUTDOWN-006 single blocked producer passed.\n"
+                : "SHUTDOWN-007 four blocked producers passed.\n"
+        );
+    }
+    return status;
+}
+
+static int test_shutdown_blocked_consumers(int waiter_count)
+{
+    ConcurrentTaskQueue queue = {0};
+    Task sentinels[BLOCKING_CONSUMER_COUNT];
+    Task snapshots[BLOCKING_CONSUMER_COUNT];
+    BlockingTestSync sync = {{0}, {0}, 0, 0};
+    BlockingConsumerContext contexts[BLOCKING_CONSUMER_COUNT] = {0};
+    SchedThread threads[BLOCKING_CONSUMER_COUNT] = {0};
+    bool sync_initialized = false;
+    int created = 0;
+    int joined = 0;
+    int index;
+    int thread_result;
+    int status = EXIT_FAILURE;
+
+    if (waiter_count < 1 || waiter_count > BLOCKING_CONSUMER_COUNT
+        || initialize_tasks(
+            sentinels,
+            snapshots,
+            (size_t)waiter_count
+        ) != EXIT_SUCCESS
+        || concurrent_task_queue_init(&queue, 1U)
+            != CONCURRENT_TASK_QUEUE_OK
+        || blocking_sync_init(&sync) != EXIT_SUCCESS) {
+        concurrent_task_queue_destroy(&queue);
+        return EXIT_FAILURE;
+    }
+    sync_initialized = true;
+
+    for (index = 0; index < waiter_count; index++) {
+        contexts[index].queue = &queue;
+        contexts[index].sync = &sync;
+        contexts[index].output = &sentinels[index];
+        if (sched_thread_create(
+                &threads[index],
+                blocking_consumer_worker,
+                &contexts[index]
+            ) != SCHED_SYNC_OK) {
+            goto cleanup;
+        }
+        created++;
+    }
+
+    if (blocking_sync_wait_for(&sync, &sync.started, waiter_count)
+            != EXIT_SUCCESS
+        || sched_mutex_lock(&sync.mutex) != SCHED_SYNC_OK) {
+        goto cleanup;
+    }
+    if (sync.completed != 0) {
+        (void)sched_mutex_unlock(&sync.mutex);
+        goto cleanup;
+    }
+    if (sched_mutex_unlock(&sync.mutex) != SCHED_SYNC_OK
+        || concurrent_task_queue_shutdown(&queue)
+            != CONCURRENT_TASK_QUEUE_OK
+        || blocking_sync_wait_for(&sync, &sync.completed, waiter_count)
+            != EXIT_SUCCESS) {
+        goto cleanup;
+    }
+
+    for (index = 0; index < created; index++) {
+        thread_result = 0;
+        if (sched_thread_join(&threads[index], &thread_result)
+                != SCHED_SYNC_OK
+            || thread_result != BLOCKING_CONSUMER_RESULT
+            || !contexts[index].executed
+            || contexts[index].result
+                != CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN
+            || contexts[index].output != &sentinels[index]) {
+            goto cleanup;
+        }
+        joined++;
+    }
+
+    if (!concurrent_task_queue_is_empty(&queue)
+        || concurrent_task_queue_is_full(&queue)
+        || concurrent_task_queue_size(&queue) != 0U
+        || concurrent_task_queue_capacity(&queue) != 1U
+        || memcmp(
+            sentinels,
+            snapshots,
+            (size_t)waiter_count * sizeof(sentinels[0])
+        ) != 0) {
+        goto cleanup;
+    }
+    status = EXIT_SUCCESS;
+
+cleanup:
+    if (created > joined) {
+        (void)concurrent_task_queue_shutdown(&queue);
+        (void)blocking_sync_wait_for(&sync, &sync.completed, created);
+    }
+    for (index = joined; index < created; index++) {
+        (void)sched_thread_join(&threads[index], &thread_result);
+    }
+    for (index = 0; index < created; index++) {
+        sched_thread_destroy(&threads[index]);
+    }
+    if (sync_initialized) {
+        blocking_sync_destroy(&sync);
+    }
+    concurrent_task_queue_destroy(&queue);
+    if (status == EXIT_SUCCESS) {
+        printf(
+            waiter_count == 1
+                ? "SHUTDOWN-012 single blocked consumer passed.\n"
+                : "SHUTDOWN-013 four blocked consumers passed.\n"
+        );
+    }
+    return status;
+}
+
+static int test_shutdown_wraparound(void)
+{
+    ConcurrentTaskQueue queue = {0};
+    Task tasks[5];
+    Task snapshots[5];
+    Task *output = NULL;
+    size_t index;
+    int status = EXIT_FAILURE;
+
+    if (initialize_tasks(tasks, snapshots, 5U) != EXIT_SUCCESS
+        || concurrent_task_queue_init(&queue, 3U)
+            != CONCURRENT_TASK_QUEUE_OK
+        || concurrent_task_queue_enqueue(&queue, &tasks[0])
+            != CONCURRENT_TASK_QUEUE_OK
+        || concurrent_task_queue_enqueue(&queue, &tasks[1])
+            != CONCURRENT_TASK_QUEUE_OK
+        || concurrent_task_queue_enqueue(&queue, &tasks[2])
+            != CONCURRENT_TASK_QUEUE_OK
+        || concurrent_task_queue_dequeue(&queue, &output)
+            != CONCURRENT_TASK_QUEUE_OK
+        || output != &tasks[0]
+        || concurrent_task_queue_dequeue(&queue, &output)
+            != CONCURRENT_TASK_QUEUE_OK
+        || output != &tasks[1]
+        || concurrent_task_queue_enqueue(&queue, &tasks[3])
+            != CONCURRENT_TASK_QUEUE_OK
+        || concurrent_task_queue_enqueue(&queue, &tasks[4])
+            != CONCURRENT_TASK_QUEUE_OK
+        || concurrent_task_queue_shutdown(&queue)
+            != CONCURRENT_TASK_QUEUE_OK) {
+        goto cleanup;
+    }
+
+    for (index = 2U; index < 5U; index++) {
+        if (concurrent_task_queue_dequeue(&queue, &output)
+                != CONCURRENT_TASK_QUEUE_OK
+            || output != &tasks[index]) {
+            goto cleanup;
+        }
+    }
+    if (concurrent_task_queue_dequeue(&queue, &output)
+            != CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN
+        || concurrent_task_queue_size(&queue) != 0U
+        || concurrent_task_queue_capacity(&queue) != 3U
+        || memcmp(tasks, snapshots, sizeof(tasks)) != 0) {
+        goto cleanup;
+    }
+    status = EXIT_SUCCESS;
+
+cleanup:
+    concurrent_task_queue_destroy(&queue);
+    if (status == EXIT_SUCCESS) {
+        printf("SHUTDOWN-WRAPAROUND-001 passed.\n");
+    }
+    return status;
+}
+
+static int test_shutdown_mixed_controlled_drain(void)
+{
+    ConcurrentTaskQueue queue = {0};
+    Task tasks[
+        SHUTDOWN_AUDIT_PRODUCER_COUNT + SHUTDOWN_AUDIT_CONSUMER_COUNT
+    ];
+    Task snapshots[
+        SHUTDOWN_AUDIT_PRODUCER_COUNT + SHUTDOWN_AUDIT_CONSUMER_COUNT
+    ];
+    Task sentinels[SHUTDOWN_AUDIT_CONSUMER_COUNT];
+    Task sentinel_snapshots[SHUTDOWN_AUDIT_CONSUMER_COUNT];
+    BlockingTestSync producer_sync = {{0}, {0}, 0, 0};
+    OrderedConsumerGate gate = {{0}, {0}, 0, 0, 0, false};
+    BlockingProducerContext producers[SHUTDOWN_AUDIT_PRODUCER_COUNT] = {0};
+    OrderedConsumerContext consumers[SHUTDOWN_AUDIT_CONSUMER_COUNT] = {0};
+    SchedThread producer_threads[SHUTDOWN_AUDIT_PRODUCER_COUNT] = {0};
+    SchedThread consumer_threads[SHUTDOWN_AUDIT_CONSUMER_COUNT] = {0};
+    bool producer_sync_initialized = false;
+    bool gate_mutex_initialized = false;
+    bool gate_condition_initialized = false;
+    int producers_created = 0;
+    int consumers_created = 0;
+    int producers_joined = 0;
+    int consumers_joined = 0;
+    int index;
+    int thread_result = 0;
+    int status = EXIT_FAILURE;
+
+    if (initialize_tasks(
+            tasks,
+            snapshots,
+            SHUTDOWN_AUDIT_PRODUCER_COUNT
+                + SHUTDOWN_AUDIT_CONSUMER_COUNT
+        ) != EXIT_SUCCESS
+        || initialize_tasks(
+            sentinels,
+            sentinel_snapshots,
+            SHUTDOWN_AUDIT_CONSUMER_COUNT
+        ) != EXIT_SUCCESS
+        || concurrent_task_queue_init(&queue, 3U)
+            != CONCURRENT_TASK_QUEUE_OK
+        || blocking_sync_init(&producer_sync) != EXIT_SUCCESS) {
+        concurrent_task_queue_destroy(&queue);
+        return EXIT_FAILURE;
+    }
+    producer_sync_initialized = true;
+    if (sched_mutex_init(&gate.mutex) != SCHED_SYNC_OK) {
+        goto cleanup;
+    }
+    gate_mutex_initialized = true;
+    if (sched_condition_init(&gate.condition) != SCHED_SYNC_OK) {
+        goto cleanup;
+    }
+    gate_condition_initialized = true;
+
+    for (index = 0; index < SHUTDOWN_AUDIT_PRODUCER_COUNT; index++) {
+        if (concurrent_task_queue_enqueue(&queue, &tasks[index])
+            != CONCURRENT_TASK_QUEUE_OK) {
+            goto cleanup;
+        }
+    }
+
+    for (index = 0; index < SHUTDOWN_AUDIT_CONSUMER_COUNT; index++) {
+        consumers[index].queue = &queue;
+        consumers[index].gate = &gate;
+        consumers[index].index = index;
+        consumers[index].output = &sentinels[index];
+        if (sched_thread_create(
+                &consumer_threads[index],
+                ordered_shutdown_consumer_worker,
+                &consumers[index]
+            ) != SCHED_SYNC_OK) {
+            goto cleanup;
+        }
+        consumers_created++;
+    }
+
+    if (sched_mutex_lock(&gate.mutex) != SCHED_SYNC_OK) {
+        goto cleanup;
+    }
+    while (gate.ready < SHUTDOWN_AUDIT_CONSUMER_COUNT) {
+        if (sched_condition_wait(&gate.condition, &gate.mutex)
+            != SCHED_SYNC_OK) {
+            (void)sched_mutex_unlock(&gate.mutex);
+            goto cleanup;
+        }
+    }
+    if (sched_mutex_unlock(&gate.mutex) != SCHED_SYNC_OK) {
+        goto cleanup;
+    }
+
+    for (index = 0; index < SHUTDOWN_AUDIT_PRODUCER_COUNT; index++) {
+        producers[index].queue = &queue;
+        producers[index].task =
+            &tasks[SHUTDOWN_AUDIT_PRODUCER_COUNT + index];
+        producers[index].sync = &producer_sync;
+        if (sched_thread_create(
+                &producer_threads[index],
+                blocking_producer_worker,
+                &producers[index]
+            ) != SCHED_SYNC_OK) {
+            goto cleanup;
+        }
+        producers_created++;
+    }
+
+    if (blocking_sync_wait_for(
+            &producer_sync,
+            &producer_sync.started,
+            SHUTDOWN_AUDIT_PRODUCER_COUNT
+        ) != EXIT_SUCCESS
+        || concurrent_task_queue_shutdown(&queue)
+            != CONCURRENT_TASK_QUEUE_OK
+        || concurrent_task_queue_shutdown(&queue)
+            != CONCURRENT_TASK_QUEUE_OK
+        || blocking_sync_wait_for(
+            &producer_sync,
+            &producer_sync.completed,
+            SHUTDOWN_AUDIT_PRODUCER_COUNT
+        ) != EXIT_SUCCESS) {
+        goto cleanup;
+    }
+
+    for (index = 0; index < producers_created; index++) {
+        if (sched_thread_join(&producer_threads[index], &thread_result)
+                != SCHED_SYNC_OK
+            || thread_result != BLOCKING_THREAD_RESULT
+            || producers[index].result
+                != CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN
+            || !producers[index].executed) {
+            goto cleanup;
+        }
+        producers_joined++;
+    }
+
+    for (index = 0; index < SHUTDOWN_AUDIT_CONSUMER_COUNT; index++) {
+        if (sched_mutex_lock(&gate.mutex) != SCHED_SYNC_OK) {
+            goto cleanup;
+        }
+        gate.released = index + 1;
+        if (sched_condition_broadcast(&gate.condition) != SCHED_SYNC_OK) {
+            (void)sched_mutex_unlock(&gate.mutex);
+            goto cleanup;
+        }
+        while (gate.completed < index + 1) {
+            if (sched_condition_wait(&gate.condition, &gate.mutex)
+                != SCHED_SYNC_OK) {
+                (void)sched_mutex_unlock(&gate.mutex);
+                goto cleanup;
+            }
+        }
+        if (sched_mutex_unlock(&gate.mutex) != SCHED_SYNC_OK) {
+            goto cleanup;
+        }
+    }
+
+    for (index = 0; index < consumers_created; index++) {
+        if (sched_thread_join(&consumer_threads[index], &thread_result)
+                != SCHED_SYNC_OK
+            || thread_result != BLOCKING_CONSUMER_RESULT
+            || !consumers[index].executed) {
+            goto cleanup;
+        }
+        consumers_joined++;
+    }
+
+    for (index = 0; index < SHUTDOWN_AUDIT_PRODUCER_COUNT; index++) {
+        if (consumers[index].result != CONCURRENT_TASK_QUEUE_OK
+            || consumers[index].output != &tasks[index]) {
+            goto cleanup;
+        }
+    }
+    if (consumers[SHUTDOWN_AUDIT_CONSUMER_COUNT - 1].result
+            != CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN
+        || consumers[SHUTDOWN_AUDIT_CONSUMER_COUNT - 1].output
+            != &sentinels[SHUTDOWN_AUDIT_CONSUMER_COUNT - 1]
+        || concurrent_task_queue_size(&queue) != 0U
+        || concurrent_task_queue_capacity(&queue) != 3U
+        || memcmp(tasks, snapshots, sizeof(tasks)) != 0
+        || memcmp(sentinels, sentinel_snapshots, sizeof(sentinels)) != 0) {
+        goto cleanup;
+    }
+    status = EXIT_SUCCESS;
+
+cleanup:
+    (void)concurrent_task_queue_shutdown(&queue);
+    if (gate_mutex_initialized
+        && sched_mutex_lock(&gate.mutex) == SCHED_SYNC_OK) {
+        gate.aborted = true;
+        gate.released = SHUTDOWN_AUDIT_CONSUMER_COUNT;
+        (void)sched_condition_broadcast(&gate.condition);
+        (void)sched_mutex_unlock(&gate.mutex);
+    }
+    if (producer_sync_initialized && producers_created > producers_joined) {
+        (void)blocking_sync_wait_for(
+            &producer_sync,
+            &producer_sync.completed,
+            producers_created
+        );
+    }
+    for (index = producers_joined; index < producers_created; index++) {
+        (void)sched_thread_join(&producer_threads[index], NULL);
+    }
+    for (index = consumers_joined; index < consumers_created; index++) {
+        (void)sched_thread_join(&consumer_threads[index], NULL);
+    }
+    for (index = 0; index < producers_created; index++) {
+        sched_thread_destroy(&producer_threads[index]);
+    }
+    for (index = 0; index < consumers_created; index++) {
+        sched_thread_destroy(&consumer_threads[index]);
+    }
+    if (gate_condition_initialized) {
+        sched_condition_destroy(&gate.condition);
+    }
+    if (gate_mutex_initialized) {
+        sched_mutex_destroy(&gate.mutex);
+    }
+    if (producer_sync_initialized) {
+        blocking_sync_destroy(&producer_sync);
+    }
+    concurrent_task_queue_destroy(&queue);
+    if (status == EXIT_SUCCESS) {
+        printf("SHUTDOWN-MIXED-DRAIN-001 passed.\n");
+    }
+    return status;
+}
+
+static int test_shutdown_exact_accounting_stress(void)
+{
+    ConcurrentTaskQueue queue = {0};
+    Task tasks[PRODUCER_THREAD_COUNT][TASKS_PER_PRODUCER];
+    Task snapshots[PRODUCER_THREAD_COUNT][TASKS_PER_PRODUCER];
+    TaskRecorder recorder = {{0}, {0}, 0U};
+    IntegrationBarrier barrier = {
+        {0},
+        {0},
+        0,
+        PRODUCER_THREAD_COUNT + CONSUMER_THREAD_COUNT,
+        false,
+        false
+    };
+    ShutdownStressProducerContext producers[PRODUCER_THREAD_COUNT] = {0};
+    ShutdownStressConsumerContext consumers[CONSUMER_THREAD_COUNT] = {0};
+    SchedThread producer_threads[PRODUCER_THREAD_COUNT] = {0};
+    SchedThread consumer_threads[CONSUMER_THREAD_COUNT] = {0};
+    bool recorder_mutex_initialized = false;
+    bool barrier_mutex_initialized = false;
+    bool barrier_condition_initialized = false;
+    int producers_created = 0;
+    int consumers_created = 0;
+    int producers_joined = 0;
+    int consumers_joined = 0;
+    int producer;
+    int consumer;
+    int task_index;
+    int thread_result;
+    int status = EXIT_FAILURE;
+
+    if (concurrent_task_queue_init(&queue, 3U)
+        != CONCURRENT_TASK_QUEUE_OK) {
+        return EXIT_FAILURE;
+    }
+    for (producer = 0; producer < PRODUCER_THREAD_COUNT; producer++) {
+        for (task_index = 0; task_index < TASKS_PER_PRODUCER; task_index++) {
+            if (!task_init(
+                    &tasks[producer][task_index],
+                    12000U
+                        + (uint64_t)(producer * TASKS_PER_PRODUCER + task_index),
+                    TASK_PRIORITY_NORMAL,
+                    9U
+                )) {
+                goto cleanup;
+            }
+        }
+        memcpy(
+            snapshots[producer],
+            tasks[producer],
+            sizeof(tasks[producer])
+        );
+    }
+    if (sched_mutex_init(&recorder.mutex) != SCHED_SYNC_OK) {
+        goto cleanup;
+    }
+    recorder_mutex_initialized = true;
+    if (sched_mutex_init(&barrier.mutex) != SCHED_SYNC_OK) {
+        goto cleanup;
+    }
+    barrier_mutex_initialized = true;
+    if (sched_condition_init(&barrier.condition) != SCHED_SYNC_OK) {
+        goto cleanup;
+    }
+    barrier_condition_initialized = true;
+
+    for (consumer = 0; consumer < CONSUMER_THREAD_COUNT; consumer++) {
+        consumers[consumer].queue = &queue;
+        consumers[consumer].recorder = &recorder;
+        consumers[consumer].barrier = &barrier;
+        if (sched_thread_create(
+                &consumer_threads[consumer],
+                shutdown_stress_consumer_worker,
+                &consumers[consumer]
+            ) != SCHED_SYNC_OK) {
+            goto abort_threads;
+        }
+        consumers_created++;
+    }
+    for (producer = 0; producer < PRODUCER_THREAD_COUNT; producer++) {
+        producers[producer].queue = &queue;
+        producers[producer].tasks = tasks[producer];
+        producers[producer].count = TASKS_PER_PRODUCER;
+        producers[producer].barrier = &barrier;
+        if (sched_thread_create(
+                &producer_threads[producer],
+                shutdown_stress_producer_worker,
+                &producers[producer]
+            ) != SCHED_SYNC_OK) {
+            goto abort_threads;
+        }
+        producers_created++;
+    }
+
+    for (producer = 0; producer < producers_created; producer++) {
+        if (sched_thread_join(&producer_threads[producer], &thread_result)
+                != SCHED_SYNC_OK
+            || thread_result != BLOCKING_THREAD_RESULT
+            || producers[producer].result != CONCURRENT_TASK_QUEUE_OK
+            || !producers[producer].executed) {
+            goto abort_threads;
+        }
+        producers_joined++;
+    }
+    if (concurrent_task_queue_shutdown(&queue)
+        != CONCURRENT_TASK_QUEUE_OK) {
+        goto abort_threads;
+    }
+    for (consumer = 0; consumer < consumers_created; consumer++) {
+        if (sched_thread_join(&consumer_threads[consumer], &thread_result)
+                != SCHED_SYNC_OK
+            || thread_result != BLOCKING_CONSUMER_RESULT
+            || consumers[consumer].final_result
+                != CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN
+            || !consumers[consumer].executed) {
+            goto abort_threads;
+        }
+        consumers_joined++;
+    }
+
+    if (recorder.count != TOTAL_PRODUCER_TASKS
+        || concurrent_task_queue_size(&queue) != 0U
+        || concurrent_task_queue_capacity(&queue) != 3U) {
+        goto cleanup;
+    }
+    for (producer = 0; producer < PRODUCER_THREAD_COUNT; producer++) {
+        for (task_index = 0; task_index < TASKS_PER_PRODUCER; task_index++) {
+            if (task_pointer_count(
+                    recorder.items,
+                    recorder.count,
+                    &tasks[producer][task_index]
+                ) != 1
+                || memcmp(
+                    &tasks[producer][task_index],
+                    &snapshots[producer][task_index],
+                    sizeof(tasks[producer][task_index])
+                ) != 0) {
+                goto cleanup;
+            }
+        }
+    }
+    status = EXIT_SUCCESS;
+    goto cleanup;
+
+abort_threads:
+    (void)integration_barrier_abort(&barrier);
+    (void)concurrent_task_queue_shutdown(&queue);
+
+cleanup:
+    if (producers_created > producers_joined) {
+        (void)concurrent_task_queue_shutdown(&queue);
+    }
+    for (producer = producers_joined;
+         producer < producers_created;
+         producer++) {
+        (void)sched_thread_join(&producer_threads[producer], NULL);
+    }
+    for (consumer = consumers_joined;
+         consumer < consumers_created;
+         consumer++) {
+        (void)sched_thread_join(&consumer_threads[consumer], NULL);
+    }
+    for (producer = 0; producer < producers_created; producer++) {
+        sched_thread_destroy(&producer_threads[producer]);
+    }
+    for (consumer = 0; consumer < consumers_created; consumer++) {
+        sched_thread_destroy(&consumer_threads[consumer]);
+    }
+    if (barrier_condition_initialized) {
+        sched_condition_destroy(&barrier.condition);
+    }
+    if (barrier_mutex_initialized) {
+        sched_mutex_destroy(&barrier.mutex);
+    }
+    if (recorder_mutex_initialized) {
+        sched_mutex_destroy(&recorder.mutex);
+    }
+    concurrent_task_queue_destroy(&queue);
+    if (status == EXIT_SUCCESS) {
+        printf("SHUTDOWN-EXACT-ACCOUNTING-001 passed.\n");
+    }
+    return status;
+}
+
 int main(void)
 {
     if (test_public_api() != EXIT_SUCCESS
@@ -3159,7 +4124,17 @@ int main(void)
         || test_blocking_fifo_handoff() != EXIT_SUCCESS
         || test_mixed_blocking_dequeue() != EXIT_SUCCESS
         || test_phase_three_integration_stress() != EXIT_SUCCESS
-        || test_linearization_trace() != EXIT_SUCCESS) {
+        || test_linearization_trace() != EXIT_SUCCESS
+        || test_shutdown_basic_and_drain() != EXIT_SUCCESS
+        || test_shutdown_blocked_producers(1) != EXIT_SUCCESS
+        || test_shutdown_blocked_producers(BLOCKING_PRODUCER_COUNT)
+            != EXIT_SUCCESS
+        || test_shutdown_blocked_consumers(1) != EXIT_SUCCESS
+        || test_shutdown_blocked_consumers(BLOCKING_CONSUMER_COUNT)
+            != EXIT_SUCCESS
+        || test_shutdown_wraparound() != EXIT_SUCCESS
+        || test_shutdown_mixed_controlled_drain() != EXIT_SUCCESS
+        || test_shutdown_exact_accounting_stress() != EXIT_SUCCESS) {
         return EXIT_FAILURE;
     }
 

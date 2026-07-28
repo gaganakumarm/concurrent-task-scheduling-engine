@@ -9,6 +9,7 @@ typedef struct {
     SchedMutex mutex;
     SchedCondition not_empty;
     SchedCondition not_full;
+    bool shutdown_requested;
 } ConcurrentTaskQueueImplementation;
 
 static ConcurrentTaskQueueResult map_task_queue_result(TaskQueueResult result)
@@ -114,6 +115,40 @@ void concurrent_task_queue_destroy(ConcurrentTaskQueue *queue)
     queue->implementation = NULL;
 }
 
+ConcurrentTaskQueueResult concurrent_task_queue_shutdown(
+    ConcurrentTaskQueue *queue
+)
+{
+    ConcurrentTaskQueueImplementation *implementation;
+    bool synchronization_failed = false;
+
+    if (queue == NULL || queue->implementation == NULL) {
+        return CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT;
+    }
+
+    implementation = queue->implementation;
+    if (sched_mutex_lock(&implementation->mutex) != SCHED_SYNC_OK) {
+        return CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
+    }
+
+    implementation->shutdown_requested = true;
+    if (sched_condition_broadcast(&implementation->not_empty)
+        != SCHED_SYNC_OK) {
+        synchronization_failed = true;
+    }
+    if (sched_condition_broadcast(&implementation->not_full)
+        != SCHED_SYNC_OK) {
+        synchronization_failed = true;
+    }
+    if (sched_mutex_unlock(&implementation->mutex) != SCHED_SYNC_OK) {
+        synchronization_failed = true;
+    }
+
+    return synchronization_failed
+        ? CONCURRENT_TASK_QUEUE_ERROR_SYSTEM
+        : CONCURRENT_TASK_QUEUE_OK;
+}
+
 ConcurrentTaskQueueResult concurrent_task_queue_try_enqueue(
     ConcurrentTaskQueue *queue,
     Task *task
@@ -122,6 +157,7 @@ ConcurrentTaskQueueResult concurrent_task_queue_try_enqueue(
     ConcurrentTaskQueueImplementation *implementation;
     TaskQueueResult queue_result;
     ConcurrentTaskQueueResult result;
+    bool inserted = false;
 
     if (queue == NULL || queue->implementation == NULL || task == NULL) {
         return CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT;
@@ -132,23 +168,28 @@ ConcurrentTaskQueueResult concurrent_task_queue_try_enqueue(
         return CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
     }
 
-    queue_result = task_queue_enqueue(&queue->queue, task);
-    switch (queue_result) {
-    case TASK_QUEUE_OK:
-        result = CONCURRENT_TASK_QUEUE_OK;
-        break;
-    case TASK_QUEUE_ERROR_INVALID_ARGUMENT:
-        result = CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT;
-        break;
-    case TASK_QUEUE_ERROR_FULL:
-        result = CONCURRENT_TASK_QUEUE_ERROR_FULL;
-        break;
-    default:
-        result = CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
-        break;
+    if (implementation->shutdown_requested) {
+        result = CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN;
+    } else {
+        queue_result = task_queue_enqueue(&queue->queue, task);
+        switch (queue_result) {
+        case TASK_QUEUE_OK:
+            result = CONCURRENT_TASK_QUEUE_OK;
+            inserted = true;
+            break;
+        case TASK_QUEUE_ERROR_INVALID_ARGUMENT:
+            result = CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT;
+            break;
+        case TASK_QUEUE_ERROR_FULL:
+            result = CONCURRENT_TASK_QUEUE_ERROR_FULL;
+            break;
+        default:
+            result = CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
+            break;
+        }
     }
 
-    if (queue_result == TASK_QUEUE_OK
+    if (inserted
         && sched_condition_signal(&implementation->not_empty)
             != SCHED_SYNC_OK) {
         result = CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
@@ -169,6 +210,7 @@ ConcurrentTaskQueueResult concurrent_task_queue_enqueue(
     ConcurrentTaskQueueImplementation *implementation;
     TaskQueueResult queue_result;
     ConcurrentTaskQueueResult result;
+    bool inserted = false;
 
     if (queue == NULL || queue->implementation == NULL || task == NULL) {
         return CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT;
@@ -179,7 +221,8 @@ ConcurrentTaskQueueResult concurrent_task_queue_enqueue(
         return CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
     }
 
-    while (task_queue_is_full(&queue->queue)) {
+    while (!implementation->shutdown_requested
+        && task_queue_is_full(&queue->queue)) {
         if (sched_condition_wait(
                 &implementation->not_full,
                 &implementation->mutex
@@ -189,21 +232,26 @@ ConcurrentTaskQueueResult concurrent_task_queue_enqueue(
         }
     }
 
-    queue_result = task_queue_enqueue(&queue->queue, task);
-    switch (queue_result) {
-    case TASK_QUEUE_OK:
-        result = CONCURRENT_TASK_QUEUE_OK;
-        break;
-    case TASK_QUEUE_ERROR_INVALID_ARGUMENT:
-        result = CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT;
-        break;
-    case TASK_QUEUE_ERROR_FULL:
-    default:
-        result = CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
-        break;
+    if (implementation->shutdown_requested) {
+        result = CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN;
+    } else {
+        queue_result = task_queue_enqueue(&queue->queue, task);
+        switch (queue_result) {
+        case TASK_QUEUE_OK:
+            result = CONCURRENT_TASK_QUEUE_OK;
+            inserted = true;
+            break;
+        case TASK_QUEUE_ERROR_INVALID_ARGUMENT:
+            result = CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT;
+            break;
+        case TASK_QUEUE_ERROR_FULL:
+        default:
+            result = CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
+            break;
+        }
     }
 
-    if (queue_result == TASK_QUEUE_OK
+    if (inserted
         && sched_condition_signal(&implementation->not_empty)
             != SCHED_SYNC_OK) {
         result = CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
@@ -236,21 +284,26 @@ ConcurrentTaskQueueResult concurrent_task_queue_try_dequeue(
         return CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
     }
 
-    queue_result = task_queue_dequeue(&queue->queue, &removed_task);
-    switch (queue_result) {
-    case TASK_QUEUE_OK:
-        result = CONCURRENT_TASK_QUEUE_OK;
-        removed = true;
-        break;
-    case TASK_QUEUE_ERROR_INVALID_ARGUMENT:
-        result = CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT;
-        break;
-    case TASK_QUEUE_ERROR_EMPTY:
-        result = CONCURRENT_TASK_QUEUE_ERROR_EMPTY;
-        break;
-    default:
-        result = CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
-        break;
+    if (task_queue_is_empty(&queue->queue)) {
+        queue_result = TASK_QUEUE_ERROR_EMPTY;
+        result = implementation->shutdown_requested
+            ? CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN
+            : CONCURRENT_TASK_QUEUE_ERROR_EMPTY;
+    } else {
+        queue_result = task_queue_dequeue(&queue->queue, &removed_task);
+        switch (queue_result) {
+        case TASK_QUEUE_OK:
+            result = CONCURRENT_TASK_QUEUE_OK;
+            removed = true;
+            break;
+        case TASK_QUEUE_ERROR_INVALID_ARGUMENT:
+            result = CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT;
+            break;
+        case TASK_QUEUE_ERROR_EMPTY:
+        default:
+            result = CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
+            break;
+        }
     }
 
     if (removed
@@ -289,7 +342,8 @@ ConcurrentTaskQueueResult concurrent_task_queue_dequeue(
         return CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
     }
 
-    while (task_queue_is_empty(&queue->queue)) {
+    while (!implementation->shutdown_requested
+        && task_queue_is_empty(&queue->queue)) {
         if (sched_condition_wait(
                 &implementation->not_empty,
                 &implementation->mutex
@@ -299,19 +353,24 @@ ConcurrentTaskQueueResult concurrent_task_queue_dequeue(
         }
     }
 
-    queue_result = task_queue_dequeue(&queue->queue, &removed_task);
-    switch (queue_result) {
-    case TASK_QUEUE_OK:
-        result = CONCURRENT_TASK_QUEUE_OK;
-        removed = true;
-        break;
-    case TASK_QUEUE_ERROR_INVALID_ARGUMENT:
-        result = CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT;
-        break;
-    case TASK_QUEUE_ERROR_EMPTY:
-    default:
-        result = CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
-        break;
+    if (task_queue_is_empty(&queue->queue)) {
+        queue_result = TASK_QUEUE_ERROR_EMPTY;
+        result = CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN;
+    } else {
+        queue_result = task_queue_dequeue(&queue->queue, &removed_task);
+        switch (queue_result) {
+        case TASK_QUEUE_OK:
+            result = CONCURRENT_TASK_QUEUE_OK;
+            removed = true;
+            break;
+        case TASK_QUEUE_ERROR_INVALID_ARGUMENT:
+            result = CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT;
+            break;
+        case TASK_QUEUE_ERROR_EMPTY:
+        default:
+            result = CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
+            break;
+        }
     }
 
     if (removed
@@ -350,21 +409,26 @@ ConcurrentTaskQueueResult concurrent_task_queue_try_peek(
         return CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
     }
 
-    queue_result = task_queue_peek(&queue->queue, &peeked_task);
-    switch (queue_result) {
-    case TASK_QUEUE_OK:
-        result = CONCURRENT_TASK_QUEUE_OK;
-        peeked = true;
-        break;
-    case TASK_QUEUE_ERROR_INVALID_ARGUMENT:
-        result = CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT;
-        break;
-    case TASK_QUEUE_ERROR_EMPTY:
-        result = CONCURRENT_TASK_QUEUE_ERROR_EMPTY;
-        break;
-    default:
-        result = CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
-        break;
+    if (task_queue_is_empty(&queue->queue)) {
+        queue_result = TASK_QUEUE_ERROR_EMPTY;
+        result = implementation->shutdown_requested
+            ? CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN
+            : CONCURRENT_TASK_QUEUE_ERROR_EMPTY;
+    } else {
+        queue_result = task_queue_peek(&queue->queue, &peeked_task);
+        switch (queue_result) {
+        case TASK_QUEUE_OK:
+            result = CONCURRENT_TASK_QUEUE_OK;
+            peeked = true;
+            break;
+        case TASK_QUEUE_ERROR_INVALID_ARGUMENT:
+            result = CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT;
+            break;
+        case TASK_QUEUE_ERROR_EMPTY:
+        default:
+            result = CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
+            break;
+        }
     }
 
     if (sched_mutex_unlock(&implementation->mutex) != SCHED_SYNC_OK) {

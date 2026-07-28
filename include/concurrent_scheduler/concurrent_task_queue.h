@@ -40,6 +40,16 @@ ConcurrentTaskQueueResult concurrent_task_queue_init(
 void concurrent_task_queue_destroy(ConcurrentTaskQueue *queue);
 
 /*
+ * Irreversibly requests graceful shutdown. Repeated requests are valid and
+ * retry wake-up of all blocked producers and consumers. New enqueue operations
+ * are rejected, while already queued caller-owned Tasks remain available for
+ * FIFO draining. Destruction must still not race with active operations.
+ */
+ConcurrentTaskQueueResult concurrent_task_queue_shutdown(
+    ConcurrentTaskQueue *queue
+);
+
+/*
  * Attempts one insertion while holding the private mutex and never waits for
  * capacity. The exact caller-owned Task pointer is stored. Successful
  * insertion signals the not-empty condition before unlocking.
@@ -58,10 +68,11 @@ ConcurrentTaskQueueResult concurrent_task_queue_try_enqueue(
  * caller-owned Task pointer. The caller must keep both the Task and wrapper
  * valid until this call returns.
  *
- * There is no timeout, cancellation, or shutdown path. Destroying the wrapper
- * while this or another operation is blocked or active is invalid. A signaling
- * or unlocking failure after insertion returns SYSTEM_ERROR without rolling
- * back the stored pointer.
+ * There is no timeout or cancellation path. Shutdown wakes blocked enqueue
+ * operations and causes them to return SHUTDOWN without insertion. Destroying
+ * the wrapper while this or another operation is blocked or active is invalid.
+ * A signaling or unlocking failure after insertion returns SYSTEM_ERROR
+ * without rolling back the stored pointer.
  */
 ConcurrentTaskQueueResult concurrent_task_queue_enqueue(
     ConcurrentTaskQueue *queue,
@@ -87,10 +98,12 @@ ConcurrentTaskQueueResult concurrent_task_queue_try_dequeue(
  * caller-owned Task pointer. The caller must keep the wrapper and output
  * storage valid until this call returns.
  *
- * There is no timeout, cancellation, or shutdown path. Destroying the wrapper
- * while this or another operation is blocked or active is invalid. Failure
- * before removal preserves the output. A signaling or unlocking failure after
- * removal returns SYSTEM_ERROR while still publishing the removed pointer.
+ * There is no timeout or cancellation path. Shutdown wakes blocked dequeue
+ * operations. Queued Tasks drain in FIFO order; shutdown is returned only when
+ * storage is empty. Destroying the wrapper while this or another operation is
+ * blocked or active is invalid. Failure before removal preserves the output.
+ * A signaling or unlocking failure after removal returns SYSTEM_ERROR while
+ * still publishing the removed pointer.
  */
 ConcurrentTaskQueueResult concurrent_task_queue_dequeue(
     ConcurrentTaskQueue *queue,
