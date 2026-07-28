@@ -31,6 +31,7 @@ endfunction()
 add_library(
     concurrent_scheduler_core
     src/concurrent_scheduler.c
+    src/task.c
 )
 
 target_include_directories(
@@ -82,4 +83,22 @@ concurrent_scheduler_enable_warnings(concurrent_scheduler_tests)
 add_test(
     NAME concurrent_scheduler.foundation
     COMMAND concurrent_scheduler_tests
+)
+
+add_executable(
+    concurrent_scheduler_task_tests
+    tests/test_task.c
+)
+
+target_link_libraries(
+    concurrent_scheduler_task_tests
+    PRIVATE
+        concurrent_scheduler_core
+)
+
+concurrent_scheduler_enable_warnings(concurrent_scheduler_task_tests)
+
+add_test(
+    NAME concurrent_scheduler.task_domain
+    COMMAND concurrent_scheduler_task_tests
 )
