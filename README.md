@@ -4,7 +4,7 @@ This project will explore concurrent task execution, thread-safe task queues,
 configurable scheduling policies, worker threads, synchronization,
 backpressure, and performance measurement.
 
-Current status: Phase 1 — Task Model (basic task record)
+Current status: Phase 2 — Fixed-Capacity FIFO Task Queue
 
 These systems are planned and are not yet implemented.
 
@@ -19,7 +19,18 @@ exhaustion completes the task. This models deterministic work accounting, not
 CPU execution or elapsed time. Scheduling and concurrency functionality are
 not implemented.
 
-CTest verifies the public project version API and task domain definitions.
+The public API for a configurable, fixed-capacity FIFO task queue is defined.
+It specifies circular-buffer metadata and stores non-owning Task pointers.
+Queue initialization now allocates its internal pointer buffer, and destruction
+releases only that buffer. Enqueue rejects null tasks and full or malformed
+queues, advances the tail with circular wraparound, and never copies a Task.
+Read-only empty, full, size, and capacity queries are also implemented. Task
+objects remain caller-owned. Dequeue returns pointers in FIFO order, clears
+vacated slots, and advances the head with circular wraparound. Non-mutating
+peek returns the oldest FIFO pointer without removal. All basic non-thread-safe
+FIFO operations are implemented; blocking and synchronized behavior are not.
+
+CTest verifies the public project version API, task domain, and FIFO queue.
 
 ## Planned Architecture
 
