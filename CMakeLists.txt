@@ -239,6 +239,39 @@ if(WIN32)
         NAME concurrent_scheduler.scheduler
         COMMAND concurrent_scheduler_scheduler_tests
     )
+
+    add_executable(
+        concurrent_scheduler_benchmarks
+        benchmarks/benchmark_scheduler.c
+        benchmarks/benchmark_timer_windows.c
+    )
+
+    target_include_directories(
+        concurrent_scheduler_benchmarks
+        PRIVATE
+            "${PROJECT_SOURCE_DIR}/benchmarks"
+            "${PROJECT_SOURCE_DIR}/src"
+            "${PROJECT_SOURCE_DIR}/src/platform"
+    )
+
+    target_link_libraries(
+        concurrent_scheduler_benchmarks
+        PRIVATE
+            concurrent_scheduler_core
+            concurrent_scheduler_platform_sync
+    )
+
+    target_compile_definitions(
+        concurrent_scheduler_benchmarks
+        PRIVATE
+            WIN32_LEAN_AND_MEAN
+            NOMINMAX
+            BENCHMARK_VERSION="${PROJECT_VERSION}"
+    )
+
+    concurrent_scheduler_enable_warnings(
+        concurrent_scheduler_benchmarks
+    )
 else()
     message(
         FATAL_ERROR
