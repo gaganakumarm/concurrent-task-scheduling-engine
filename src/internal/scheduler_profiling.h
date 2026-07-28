@@ -45,6 +45,8 @@ typedef struct {
     uint64_t queue_empty_observations;
     uint64_t not_empty_signals;
     uint64_t not_full_signals;
+    uint64_t avoided_not_empty_signals;
+    uint64_t avoided_not_full_signals;
     uint64_t shutdown_broadcasts;
     uint64_t occupancy_sample_count;
     uint64_t occupancy_sample_sum;

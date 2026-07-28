@@ -1,0 +1,5 @@
+scenario,iteration,producer_index,tasks_attempted,tasks_accepted,tasks_rejected,submit_total_ns,submit_min_ns,submit_max_ns,submit_p50_ns,submit_p95_ns
+throughput,1,0,250000,250000,0,811673800,0,49758400,1600,6900
+throughput,1,1,250000,250000,0,821317900,0,22024900,1700,6600
+throughput,1,2,250000,250000,0,823704900,100,22025600,1500,6500
+throughput,1,3,250000,250000,0,786613400,100,16356600,1400,7000

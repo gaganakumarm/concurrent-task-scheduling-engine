@@ -206,3 +206,11 @@ companions. Occupancy is sampled after successful enqueue/dequeue mutations;
 its mean is event-sampled, not time-weighted. Cumulative lock and callback
 durations are concurrent thread-time, so ratios against wall time can exceed
 100% and must not be added as a wall-time decomposition.
+
+Checkpoint 5.4 retains the internal build switch
+`CONCURRENT_SCHEDULER_USE_TRANSITION_SIGNALING`. It defaults to `OFF`, which
+preserves unconditional signaling. `ON` enables the rejected experimental
+policy: signal on empty/full boundary transitions or while corresponding
+condition waiters remain. The waiter propagation clause is required for
+progress; strict boundary-only signaling stalled during the pre-matrix smoke
+test. The switch is private and exists only to reproduce the experiment.

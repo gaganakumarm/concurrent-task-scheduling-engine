@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="480" viewBox="0 0 900 480">
+<rect width="100%" height="100%" fill="white"/>
+<text x="450" y="28" text-anchor="middle" font-family="sans-serif" font-size="19">Enqueue wait rate</text>
+<line x1="80" y1="55" x2="80" y2="385" stroke="#333"/>
+<line x1="80" y1="385" x2="870" y2="385" stroke="#333"/>
+<line x1="80" y1="385.0" x2="870" y2="385.0" stroke="#ddd"/>
+<text x="72" y="389.0" text-anchor="end" font-family="sans-serif" font-size="11">0</text>
+<line x1="80" y1="319.0" x2="870" y2="319.0" stroke="#ddd"/>
+<text x="72" y="323.0" text-anchor="end" font-family="sans-serif" font-size="11">22.3</text>
+<line x1="80" y1="253.0" x2="870" y2="253.0" stroke="#ddd"/>
+<text x="72" y="257.0" text-anchor="end" font-family="sans-serif" font-size="11">44.7</text>
+<line x1="80" y1="187.0" x2="870" y2="187.0" stroke="#ddd"/>
+<text x="72" y="191.0" text-anchor="end" font-family="sans-serif" font-size="11">67</text>
+<line x1="80" y1="121.0" x2="870" y2="121.0" stroke="#ddd"/>
+<text x="72" y="125.0" text-anchor="end" font-family="sans-serif" font-size="11">89.3</text>
+<line x1="80" y1="55.0" x2="870" y2="55.0" stroke="#ddd"/>
+<text x="72" y="59.0" text-anchor="end" font-family="sans-serif" font-size="11">112</text>
+<rect x="90.15714285714287" y="92.21278859033964" width="16.057142857142857" height="292.78721140966036" fill="#2364aa"/>
+<rect x="108.21428571428572" y="90.35714285714289" width="16.057142857142857" height="294.6428571428571" fill="#d1495b"/>
+<text x="108.21428571428572" y="405" text-anchor="middle" font-family="sans-serif" font-size="10">light_w1_p4_c64</text>
+<rect x="146.5857142857143" y="147.65168229453946" width="16.057142857142857" height="237.34831770546054" fill="#2364aa"/>
+<rect x="164.64285714285714" y="157.53270033882282" width="16.057142857142857" height="227.46729966117718" fill="#d1495b"/>
+<text x="164.64285714285714" y="405" text-anchor="middle" font-family="sans-serif" font-size="10">light_w2_p4_c64</text>
+<rect x="203.01428571428573" y="330.13139232526987" width="16.057142857142857" height="54.86860767473013" fill="#2364aa"/>
+<rect x="221.07142857142858" y="331.1655897880388" width="16.057142857142857" height="53.8344102119612" fill="#d1495b"/>
+<text x="221.07142857142858" y="405" text-anchor="middle" font-family="sans-serif" font-size="10">light_w4_p4_c64</text>
+<rect x="259.4428571428571" y="373.38743991805217" width="16.057142857142857" height="11.612560081947834" fill="#2364aa"/>
+<rect x="277.5" y="374.7318966196517" width="16.057142857142857" height="10.268103380348293" fill="#d1495b"/>
+<text x="277.5" y="405" text-anchor="middle" font-family="sans-serif" font-size="10">light_w8_p4_c64</text>
+<rect x="315.87142857142857" y="99.98699866046809" width="16.057142857142857" height="285.0130013395319" fill="#2364aa"/>
+<rect x="333.92857142857144" y="107.56618863761724" width="16.057142857142857" height="277.43381136238276" fill="#d1495b"/>
+<text x="333.92857142857144" y="405" text-anchor="middle" font-family="sans-serif" font-size="10">medium_w4_p4_c64</text>
+<rect x="372.3" y="117.09853439445283" width="16.057142857142857" height="267.9014656055472" fill="#2364aa"/>
+<rect x="390.3571428571429" y="125.96012922543542" width="16.057142857142857" height="259.0398707745646" fill="#d1495b"/>
+<text x="390.3571428571429" y="405" text-anchor="middle" font-family="sans-serif" font-size="10">noop_w1_p4_c64</text>
+<rect x="428.7285714285714" y="238.8235757623513" width="16.057142857142857" height="146.1764242376487" fill="#2364aa"/>
+<rect x="446.7857142857143" y="210.47770073280282" width="16.057142857142857" height="174.52229926719718" fill="#d1495b"/>
+<text x="446.7857142857143" y="405" text-anchor="middle" font-family="sans-serif" font-size="10">noop_w2_p4_c64</text>
+<rect x="485.15714285714284" y="384.98227090063824" width="16.057142857142857" height="0.017729099361758927" fill="#2364aa"/>
+<rect x="503.2142857142857" y="384.9881806004255" width="16.057142857142857" height="0.011819399574505951" fill="#d1495b"/>
+<text x="503.2142857142857" y="405" text-anchor="middle" font-family="sans-serif" font-size="10">noop_w4_p1_c64</text>
+<rect x="541.5857142857143" y="384.69269561106296" width="16.057142857142857" height="0.30730438893704104" fill="#2364aa"/>
+<rect x="559.6428571428571" y="384.90839965329764" width="16.057142857142857" height="0.09160034670236428" fill="#d1495b"/>
+<text x="559.6428571428571" y="405" text-anchor="middle" font-family="sans-serif" font-size="10">noop_w4_p2_c64</text>
+<rect x="598.0142857142857" y="233.2861870616973" width="16.057142857142857" height="151.7138129383027" fill="#2364aa"/>
+<rect x="616.0714285714286" y="225.82814593018676" width="16.057142857142857" height="159.17185406981324" fill="#d1495b"/>
+<text x="616.0714285714286" y="405" text-anchor="middle" font-family="sans-serif" font-size="10">noop_w4_p4_c1</text>
+<rect x="654.4428571428572" y="359.15688283035223" width="16.057142857142857" height="25.84311716964777" fill="#2364aa"/>
+<rect x="672.5" y="357.47261839098576" width="16.057142857142857" height="27.527381609014242" fill="#d1495b"/>
+<text x="672.5" y="405" text-anchor="middle" font-family="sans-serif" font-size="10">noop_w4_p4_c16</text>
+<rect x="710.8714285714286" y="368.99062327633754" width="16.057142857142857" height="16.009376723662456" fill="#2364aa"/>
+<rect x="728.9285714285714" y="355.4928689622567" width="16.057142857142857" height="29.507131037743306" fill="#d1495b"/>
+<text x="728.9285714285714" y="405" text-anchor="middle" font-family="sans-serif" font-size="10">noop_w4_p4_c256</text>
+<rect x="767.3000000000001" y="353.6667717279962" width="16.057142857142857" height="31.333228272003794" fill="#2364aa"/>
+<rect x="785.3571428571429" y="347.29611535733983" width="16.057142857142857" height="37.70388464266017" fill="#d1495b"/>
+<text x="785.3571428571429" y="405" text-anchor="middle" font-family="sans-serif" font-size="10">noop_w4_p4_c64</text>
+<rect x="823.7285714285715" y="382.184028051375" width="16.057142857142857" height="2.8159719486250196" fill="#2364aa"/>
+<rect x="841.7857142857143" y="379.557166495942" width="16.057142857142857" height="5.442833504058001" fill="#d1495b"/>
+<text x="841.7857142857143" y="405" text-anchor="middle" font-family="sans-serif" font-size="10">noop_w8_p4_c64</text>
+<text x="18" y="220" transform="rotate(-90 18 220)" text-anchor="middle" font-family="sans-serif" font-size="12">percent</text>
+<rect x="90" y="435" width="14" height="14" fill="#2364aa"/><text x="110" y="447" font-family="sans-serif" font-size="12">control</text>
+<rect x="190" y="435" width="14" height="14" fill="#d1495b"/><text x="210" y="447" font-family="sans-serif" font-size="12">candidate</text>
+</svg>

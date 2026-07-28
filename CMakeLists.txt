@@ -18,6 +18,11 @@ option(
     "Enable benchmark-private contention profiling diagnostics"
     OFF
 )
+option(
+    CONCURRENT_SCHEDULER_USE_TRANSITION_SIGNALING
+    "Use transition-aware queue condition signaling"
+    OFF
+)
 
 function(concurrent_scheduler_enable_warnings target)
     if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
@@ -53,6 +58,7 @@ target_compile_definitions(
     concurrent_scheduler_core
     PRIVATE
         CONCURRENT_SCHEDULER_VERSION="${PROJECT_VERSION}"
+        CONCURRENT_SCHEDULER_USE_TRANSITION_SIGNALING=$<BOOL:${CONCURRENT_SCHEDULER_USE_TRANSITION_SIGNALING}>
 )
 
 concurrent_scheduler_enable_warnings(concurrent_scheduler_core)

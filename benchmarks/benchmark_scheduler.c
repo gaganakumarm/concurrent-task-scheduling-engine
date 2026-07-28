@@ -178,6 +178,9 @@ static const char *const CSV_HEADER =
     "dequeue_wait_count,dequeue_wait_total_ns,dequeue_wait_max_ns,"
     "queue_full_observations,queue_empty_observations,"
     "not_empty_signals,not_full_signals,shutdown_broadcasts,"
+    "avoided_not_empty_signals,avoided_not_full_signals,"
+    "not_empty_signals_per_task,not_full_signals_per_task,"
+    "total_signals_per_task,"
     "enqueue_predicate_false_wakeups,"
     "dequeue_predicate_false_wakeups,occupancy_sample_count,"
     "occupancy_event_mean,occupancy_min,occupancy_max,"
@@ -1300,6 +1303,9 @@ static bool write_csv_row(
     uint64_t dequeue_wait_ns;
     uint64_t dequeue_wait_max_ns;
     double occupancy_mean;
+    double not_empty_signals_per_task;
+    double not_full_signals_per_task;
+    double total_signals_per_task;
 #define PROFILE_TICKS_TO_NS(value) ((uint64_t)( \
     ((long double)(value) * 1000000000.0L) \
     / (long double)profile->timer_frequency \
@@ -1377,15 +1383,28 @@ static bool write_csv_row(
         ? 0.0
         : (double)profile->occupancy_sample_sum
             / (double)profile->occupancy_sample_count;
+    not_empty_signals_per_task = result->accepted == 0U
+        ? 0.0
+        : (double)profile->not_empty_signals / (double)result->accepted;
+    not_full_signals_per_task = result->executed == 0U
+        ? 0.0
+        : (double)profile->not_full_signals / (double)result->executed;
+    total_signals_per_task = result->executed == 0U
+        ? 0.0
+        : (double)(profile->not_empty_signals + profile->not_full_signals)
+            / (double)result->executed;
     written = fprintf(
         file,
         "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
         "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
         "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
         "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
-        "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
-        "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
-        "%.6f,%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
+        "%" PRIu64 ",%" PRIu64 ","
+        "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
+        "%" PRIu64 ",%" PRIu64 ",%.9f,%.9f,%.9f,"
+        "%" PRIu64 ",%" PRIu64 ","
+        "%" PRIu64 ",%.6f,%" PRIu64 ",%" PRIu64 ","
+        "%" PRIu64 ",%" PRIu64 ","
         "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%.9f,%zu,%s,",
         profile->enqueue_lock_attempts,
         enqueue_lock_ns,
@@ -1406,6 +1425,11 @@ static bool write_csv_row(
         profile->not_empty_signals,
         profile->not_full_signals,
         profile->shutdown_broadcasts,
+        profile->avoided_not_empty_signals,
+        profile->avoided_not_full_signals,
+        not_empty_signals_per_task,
+        not_full_signals_per_task,
+        total_signals_per_task,
         profile->enqueue_predicate_false_wakeups,
         profile->dequeue_predicate_false_wakeups,
         profile->occupancy_sample_count,

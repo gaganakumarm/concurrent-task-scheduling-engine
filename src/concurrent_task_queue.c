@@ -21,6 +21,8 @@ typedef struct {
     SchedCondition not_empty;
     SchedCondition not_full;
     bool shutdown_requested;
+    size_t waiting_consumers;
+    size_t waiting_producers;
 #if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
     SchedulerProfilingSnapshot profiling;
 #endif
@@ -312,6 +314,10 @@ ConcurrentTaskQueueResult concurrent_task_queue_try_enqueue(
     TaskQueueResult queue_result;
     ConcurrentTaskQueueResult result;
     bool inserted = false;
+    bool was_empty = false;
+#if !CONCURRENT_SCHEDULER_USE_TRANSITION_SIGNALING
+    (void)was_empty;
+#endif
 
     if (queue == NULL || queue->implementation == NULL || task == NULL) {
         return CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT;
@@ -325,6 +331,7 @@ ConcurrentTaskQueueResult concurrent_task_queue_try_enqueue(
     if (implementation->shutdown_requested) {
         result = CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN;
     } else {
+        was_empty = task_queue_is_empty(&queue->queue);
         queue_result = task_queue_enqueue(&queue->queue, task);
         switch (queue_result) {
         case TASK_QUEUE_OK:
@@ -344,6 +351,9 @@ ConcurrentTaskQueueResult concurrent_task_queue_try_enqueue(
     }
 
     if (inserted
+#if CONCURRENT_SCHEDULER_USE_TRANSITION_SIGNALING
+        && (was_empty || implementation->waiting_consumers > 0U)
+#endif
         && sched_condition_signal(&implementation->not_empty)
             != SCHED_SYNC_OK) {
         result = CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
@@ -365,6 +375,10 @@ ConcurrentTaskQueueResult concurrent_task_queue_enqueue(
     TaskQueueResult queue_result;
     ConcurrentTaskQueueResult result;
     bool inserted = false;
+    bool was_empty = false;
+#if !CONCURRENT_SCHEDULER_USE_TRANSITION_SIGNALING
+    (void)was_empty;
+#endif
 #if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
     uint64_t lock_start;
     uint64_t lock_end;
@@ -427,13 +441,16 @@ ConcurrentTaskQueueResult concurrent_task_queue_enqueue(
         );
         wait_start = profiling_now(implementation);
 #endif
+        ++implementation->waiting_producers;
         if (sched_condition_wait(
                 &implementation->not_full,
                 &implementation->mutex
             ) != SCHED_SYNC_OK) {
+            --implementation->waiting_producers;
             (void)sched_mutex_unlock(&implementation->mutex);
             return CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
         }
+        --implementation->waiting_producers;
 #if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
         wait_end = profiling_now(implementation);
         profiling_increment(
@@ -461,6 +478,7 @@ ConcurrentTaskQueueResult concurrent_task_queue_enqueue(
     if (implementation->shutdown_requested) {
         result = CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN;
     } else {
+        was_empty = task_queue_is_empty(&queue->queue);
         queue_result = task_queue_enqueue(&queue->queue, task);
         switch (queue_result) {
         case TASK_QUEUE_OK:
@@ -492,15 +510,29 @@ ConcurrentTaskQueueResult concurrent_task_queue_enqueue(
     }
 
     if (inserted
+#if CONCURRENT_SCHEDULER_USE_TRANSITION_SIGNALING
+        && (was_empty || implementation->waiting_consumers > 0U)
+#endif
         && sched_condition_signal(&implementation->not_empty)
             != SCHED_SYNC_OK) {
         result = CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
     }
 #if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
-    if (inserted) {
+    if (inserted && (
+#if CONCURRENT_SCHEDULER_USE_TRANSITION_SIGNALING
+            (was_empty || implementation->waiting_consumers > 0U)
+#else
+            true
+#endif
+        )) {
         profiling_increment(
             implementation,
             &implementation->profiling.not_empty_signals
+        );
+    } else if (inserted) {
+        profiling_increment(
+            implementation,
+            &implementation->profiling.avoided_not_empty_signals
         );
     }
 #endif
@@ -522,6 +554,10 @@ ConcurrentTaskQueueResult concurrent_task_queue_try_dequeue(
     TaskQueueResult queue_result;
     ConcurrentTaskQueueResult result;
     bool removed = false;
+    bool was_full = false;
+#if !CONCURRENT_SCHEDULER_USE_TRANSITION_SIGNALING
+    (void)was_full;
+#endif
 
     if (queue == NULL || queue->implementation == NULL || task == NULL) {
         return CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT;
@@ -538,6 +574,7 @@ ConcurrentTaskQueueResult concurrent_task_queue_try_dequeue(
             ? CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN
             : CONCURRENT_TASK_QUEUE_ERROR_EMPTY;
     } else {
+        was_full = task_queue_is_full(&queue->queue);
         queue_result = task_queue_dequeue(&queue->queue, &removed_task);
         switch (queue_result) {
         case TASK_QUEUE_OK:
@@ -555,6 +592,9 @@ ConcurrentTaskQueueResult concurrent_task_queue_try_dequeue(
     }
 
     if (removed
+#if CONCURRENT_SCHEDULER_USE_TRANSITION_SIGNALING
+        && (was_full || implementation->waiting_producers > 0U)
+#endif
         && sched_condition_signal(&implementation->not_full)
             != SCHED_SYNC_OK) {
         result = CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
@@ -580,6 +620,10 @@ ConcurrentTaskQueueResult concurrent_task_queue_dequeue(
     TaskQueueResult queue_result;
     ConcurrentTaskQueueResult result;
     bool removed = false;
+    bool was_full = false;
+#if !CONCURRENT_SCHEDULER_USE_TRANSITION_SIGNALING
+    (void)was_full;
+#endif
 #if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
     uint64_t lock_start;
     uint64_t lock_end;
@@ -661,13 +705,16 @@ ConcurrentTaskQueueResult concurrent_task_queue_dequeue(
         }
         wait_start = profiling_now(implementation);
 #endif
+        ++implementation->waiting_consumers;
         if (sched_condition_wait(
                 &implementation->not_empty,
                 &implementation->mutex
             ) != SCHED_SYNC_OK) {
+            --implementation->waiting_consumers;
             (void)sched_mutex_unlock(&implementation->mutex);
             return CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
         }
+        --implementation->waiting_consumers;
 #if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
         wait_end = profiling_now(implementation);
         profiling_increment(
@@ -705,6 +752,7 @@ ConcurrentTaskQueueResult concurrent_task_queue_dequeue(
         queue_result = TASK_QUEUE_ERROR_EMPTY;
         result = CONCURRENT_TASK_QUEUE_ERROR_SHUTDOWN;
     } else {
+        was_full = task_queue_is_full(&queue->queue);
         queue_result = task_queue_dequeue(&queue->queue, &removed_task);
         switch (queue_result) {
         case TASK_QUEUE_OK:
@@ -742,15 +790,29 @@ ConcurrentTaskQueueResult concurrent_task_queue_dequeue(
     }
 
     if (removed
+#if CONCURRENT_SCHEDULER_USE_TRANSITION_SIGNALING
+        && (was_full || implementation->waiting_producers > 0U)
+#endif
         && sched_condition_signal(&implementation->not_full)
             != SCHED_SYNC_OK) {
         result = CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
     }
 #if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
-    if (removed) {
+    if (removed && (
+#if CONCURRENT_SCHEDULER_USE_TRANSITION_SIGNALING
+            (was_full || implementation->waiting_producers > 0U)
+#else
+            true
+#endif
+        )) {
         profiling_increment(
             implementation,
             &implementation->profiling.not_full_signals
+        );
+    } else if (removed) {
+        profiling_increment(
+            implementation,
+            &implementation->profiling.avoided_not_full_signals
         );
     }
 #endif
