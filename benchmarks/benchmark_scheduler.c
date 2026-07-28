@@ -2,11 +2,15 @@
 
 #include "concurrent_scheduler/scheduler.h"
 #include "platform/sync.h"
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+#include "internal/scheduler_profiling.h"
+#endif
 
 #include <errno.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -38,10 +42,16 @@ typedef enum {
     MODE_LOW_OVERHEAD
 } BenchmarkMode;
 
+typedef enum {
+    ACCOUNTING_STANDARD,
+    ACCOUNTING_PARTITIONED
+} AccountingMode;
+
 typedef struct {
     const char *scenario;
     CallbackProfile profile;
     BenchmarkMode mode;
+    AccountingMode accounting;
     size_t workers;
     size_t producers;
     size_t capacity;
@@ -73,6 +83,27 @@ typedef struct {
     size_t executed;
     size_t rejected;
     bool correctness_passed;
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    SchedulerProfilingSnapshot profiling;
+    uint64_t callback_compute_total_ns;
+    uint64_t callback_accounting_total_ns;
+    uint64_t callback_combined_total_ns;
+    uint64_t worker_tasks[SCHEDULER_PROFILING_MAX_WORKERS];
+    uint64_t worker_compute_ns[SCHEDULER_PROFILING_MAX_WORKERS];
+    uint64_t worker_accounting_ns[SCHEDULER_PROFILING_MAX_WORKERS];
+    uint64_t worker_combined_ns[SCHEDULER_PROFILING_MAX_WORKERS];
+    uint64_t worker_checksums[SCHEDULER_PROFILING_MAX_WORKERS];
+    double worker_task_cv;
+    size_t zero_task_workers;
+    uint64_t producer_attempted[SCHEDULER_PROFILING_MAX_WORKERS];
+    uint64_t producer_accepted[SCHEDULER_PROFILING_MAX_WORKERS];
+    uint64_t producer_rejected[SCHEDULER_PROFILING_MAX_WORKERS];
+    uint64_t producer_submit_total_ns[SCHEDULER_PROFILING_MAX_WORKERS];
+    uint64_t producer_submit_min_ns[SCHEDULER_PROFILING_MAX_WORKERS];
+    uint64_t producer_submit_max_ns[SCHEDULER_PROFILING_MAX_WORKERS];
+    uint64_t producer_submit_p50_ns[SCHEDULER_PROFILING_MAX_WORKERS];
+    uint64_t producer_submit_p95_ns[SCHEDULER_PROFILING_MAX_WORKERS];
+#endif
 } IterationResult;
 
 typedef struct {
@@ -89,7 +120,7 @@ typedef struct {
     SchedCondition blocking_condition;
     Task *tasks;
     size_t task_count;
-    unsigned int *execution_counts;
+    _Atomic unsigned int *execution_counts;
     uint64_t *completion_ticks;
     CallbackProfile profile;
     BenchmarkMode mode;
@@ -100,6 +131,18 @@ typedef struct {
     bool blocking_entered;
     bool blocking_released;
     bool failure;
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    AccountingMode accounting;
+    atomic_size_t partitioned_execution_count;
+    atomic_size_t partitioned_duplicate_count;
+    atomic_size_t partitioned_unknown_count;
+    atomic_bool partitioned_failure;
+    uint64_t worker_tasks[SCHEDULER_PROFILING_MAX_WORKERS];
+    uint64_t worker_compute_ns[SCHEDULER_PROFILING_MAX_WORKERS];
+    uint64_t worker_accounting_ns[SCHEDULER_PROFILING_MAX_WORKERS];
+    uint64_t worker_combined_ns[SCHEDULER_PROFILING_MAX_WORKERS];
+    uint64_t worker_checksums[SCHEDULER_PROFILING_MAX_WORKERS];
+#endif
 } CallbackContext;
 
 typedef struct {
@@ -125,7 +168,25 @@ static const char *const CSV_HEADER =
     "mean_submit_latency_ns,p50_submit_latency_ns,p95_submit_latency_ns,"
     "min_submit_latency_ns,max_submit_latency_ns,"
     "mean_end_to_end_latency_ns,p50_end_to_end_latency_ns,"
-    "p95_end_to_end_latency_ns,correctness_passed";
+    "p95_end_to_end_latency_ns,"
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    "enqueue_lock_attempts,enqueue_lock_wait_ns,"
+    "enqueue_lock_max_wait_ns,enqueue_inferred_contended,"
+    "dequeue_lock_attempts,dequeue_lock_wait_ns,"
+    "dequeue_lock_max_wait_ns,dequeue_inferred_contended,"
+    "enqueue_wait_count,enqueue_wait_total_ns,enqueue_wait_max_ns,"
+    "dequeue_wait_count,dequeue_wait_total_ns,dequeue_wait_max_ns,"
+    "queue_full_observations,queue_empty_observations,"
+    "not_empty_signals,not_full_signals,shutdown_broadcasts,"
+    "enqueue_predicate_false_wakeups,"
+    "dequeue_predicate_false_wakeups,occupancy_sample_count,"
+    "occupancy_event_mean,occupancy_min,occupancy_max,"
+    "occupancy_zero_observations,occupancy_full_observations,"
+    "callback_compute_total_ns,callback_accounting_total_ns,"
+    "callback_combined_total_ns,worker_task_cv,zero_task_workers,"
+    "accounting_mode,"
+#endif
+    "correctness_passed";
 
 static const char *profile_name(CallbackProfile profile)
 {
@@ -147,6 +208,13 @@ static const char *mode_name(BenchmarkMode mode)
 {
     return mode == MODE_VALIDATED ? "validated" : "low-overhead";
 }
+
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+static const char *accounting_name(AccountingMode accounting)
+{
+    return accounting == ACCOUNTING_STANDARD ? "standard" : "partitioned";
+}
+#endif
 
 static bool checked_add_size(size_t left, size_t right, size_t *result)
 {
@@ -204,6 +272,23 @@ static bool parse_mode(const char *text, BenchmarkMode *mode)
     return true;
 }
 
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+static bool parse_accounting(
+    const char *text,
+    AccountingMode *accounting
+)
+{
+    if (strcmp(text, "standard") == 0) {
+        *accounting = ACCOUNTING_STANDARD;
+    } else if (strcmp(text, "partitioned") == 0) {
+        *accounting = ACCOUNTING_PARTITIONED;
+    } else {
+        return false;
+    }
+    return true;
+}
+#endif
+
 static bool apply_scenario(BenchmarkConfig *config, const char *scenario)
 {
     config->scenario = scenario;
@@ -260,6 +345,9 @@ static void print_help(void)
         "  --warmup N --iterations N\n"
         "  --callback-profile noop|light_cpu|medium_cpu|controlled_blocking\n"
         "  --mode validated|low-overhead\n"
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+        "  --accounting standard|partitioned\n"
+#endif
         "  --output PATH\n"
         "\nDefaults: throughput, 4 workers, 4 producers, capacity 16,\n"
         "1000 Tasks, 3 warm-ups, 10 measured iterations, noop, validated."
@@ -471,10 +559,29 @@ static int benchmark_callback(Task *task, void *argument)
     uint64_t contribution;
     size_t index = 0U;
     bool known;
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    uint64_t combined_start;
+    uint64_t compute_end;
+    uint64_t accounting_end;
+    uint64_t compute_ns;
+    uint64_t accounting_ns;
+    uint64_t combined_ns;
+    size_t worker_slot;
+#endif
 
     if (task == NULL || context == NULL) {
         return 1;
     }
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    worker_slot = scheduler_profiling_current_worker_index();
+    if (worker_slot >= SCHEDULER_PROFILING_MAX_WORKERS) {
+        worker_slot = 0U;
+    }
+    if (!benchmark_timer_now(&context->timer, &combined_start)) {
+        atomic_store(&context->partitioned_failure, true);
+        return 1;
+    }
+#endif
     contribution = task->id ^ UINT64_C(0x9e3779b97f4a7c15);
     if (context->profile == PROFILE_LIGHT_CPU) {
         contribution = deterministic_work(
@@ -487,6 +594,69 @@ static int benchmark_callback(Task *task, void *argument)
             MEDIUM_CPU_OPERATIONS
         );
     }
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    if (!benchmark_timer_now(&context->timer, &compute_end)) {
+        atomic_store(&context->partitioned_failure, true);
+        return 1;
+    }
+    known = task_index_for_pointer(context, task, &index);
+    if (context->accounting == ACCOUNTING_PARTITIONED
+        && context->profile != PROFILE_CONTROLLED_BLOCKING) {
+        unsigned int prior = 0U;
+
+        if (!known) {
+            (void)atomic_fetch_add(
+                &context->partitioned_unknown_count,
+                1U
+            );
+            atomic_store(&context->partitioned_failure, true);
+        } else if (context->mode == MODE_VALIDATED) {
+            prior = atomic_fetch_add(&context->execution_counts[index], 1U);
+            if (prior != 0U) {
+                (void)atomic_fetch_add(
+                    &context->partitioned_duplicate_count,
+                    1U
+                );
+                atomic_store(&context->partitioned_failure, true);
+            }
+        if (prior == 0U) {
+            context->completion_ticks[index] = compute_end;
+        }
+        }
+        (void)atomic_fetch_add(
+            &context->partitioned_execution_count,
+            1U
+        );
+        context->worker_tasks[worker_slot]++;
+        context->worker_checksums[worker_slot] ^= contribution;
+        if (!benchmark_timer_now(&context->timer, &accounting_end)
+            || !benchmark_timer_duration_ns(
+                &context->timer,
+                combined_start,
+                compute_end,
+                &compute_ns
+            )
+            || !benchmark_timer_duration_ns(
+                &context->timer,
+                compute_end,
+                accounting_end,
+                &accounting_ns
+            )
+            || !benchmark_timer_duration_ns(
+                &context->timer,
+                combined_start,
+                accounting_end,
+                &combined_ns
+            )) {
+            atomic_store(&context->partitioned_failure, true);
+            return 1;
+        }
+        context->worker_compute_ns[worker_slot] += compute_ns;
+        context->worker_accounting_ns[worker_slot] += accounting_ns;
+        context->worker_combined_ns[worker_slot] += combined_ns;
+        return atomic_load(&context->partitioned_failure) ? 4 : 0;
+    }
+#endif
 
     if (sched_mutex_lock(&context->mutex) != SCHED_SYNC_OK) {
         return 2;
@@ -511,17 +681,19 @@ static int benchmark_callback(Task *task, void *argument)
         context->failure = true;
     }
 
+#if !defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
     known = task_index_for_pointer(context, task, &index);
+#endif
     if (!known) {
         context->unknown_count++;
         context->failure = true;
     }
     if (known && context->mode == MODE_VALIDATED) {
-        if (context->execution_counts[index] != 0U) {
+        if (atomic_load(&context->execution_counts[index]) != 0U) {
             context->duplicate_count++;
             context->failure = true;
         }
-        context->execution_counts[index]++;
+        (void)atomic_fetch_add(&context->execution_counts[index], 1U);
         context->completion_ticks[index] = completion;
     }
     if (context->execution_count == SIZE_MAX) {
@@ -530,6 +702,35 @@ static int benchmark_callback(Task *task, void *argument)
         context->execution_count++;
     }
     context->checksum ^= contribution;
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    context->worker_tasks[worker_slot]++;
+    context->worker_checksums[worker_slot] ^= contribution;
+    if (!benchmark_timer_now(&context->timer, &accounting_end)
+        || !benchmark_timer_duration_ns(
+            &context->timer,
+            combined_start,
+            compute_end,
+            &compute_ns
+        )
+        || !benchmark_timer_duration_ns(
+            &context->timer,
+            compute_end,
+            accounting_end,
+            &accounting_ns
+        )
+        || !benchmark_timer_duration_ns(
+            &context->timer,
+            combined_start,
+            accounting_end,
+            &combined_ns
+        )) {
+        context->failure = true;
+    } else {
+        context->worker_compute_ns[worker_slot] += compute_ns;
+        context->worker_accounting_ns[worker_slot] += accounting_ns;
+        context->worker_combined_ns[worker_slot] += combined_ns;
+    }
+#endif
     if (sched_mutex_unlock(&context->mutex) != SCHED_SYNC_OK) {
         return 3;
     }
@@ -540,7 +741,7 @@ static bool callback_context_init(
     CallbackContext *context,
     const BenchmarkConfig *config,
     Task *tasks,
-    unsigned int *execution_counts,
+    _Atomic unsigned int *execution_counts,
     uint64_t *completion_ticks
 )
 {
@@ -551,6 +752,13 @@ static bool callback_context_init(
     context->completion_ticks = completion_ticks;
     context->profile = config->profile;
     context->mode = config->mode;
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    context->accounting = config->accounting;
+    atomic_init(&context->partitioned_execution_count, 0U);
+    atomic_init(&context->partitioned_duplicate_count, 0U);
+    atomic_init(&context->partitioned_unknown_count, 0U);
+    atomic_init(&context->partitioned_failure, false);
+#endif
     if (!benchmark_timer_init(&context->timer)
         || sched_mutex_init(&context->mutex) != SCHED_SYNC_OK) {
         return false;
@@ -601,6 +809,7 @@ static bool validate_execution(
     const CallbackContext *callback,
     const ProducerContext *producers,
     const uint64_t *submission_ticks,
+    const uint64_t *submission_latencies,
     const uint64_t *completion_ticks,
     uint64_t *end_to_end,
     IterationResult *result
@@ -608,6 +817,15 @@ static bool validate_execution(
 {
     size_t producer;
     size_t index;
+    uint64_t expected_checksum = 0U;
+    uint64_t observed_checksum = 0U;
+#if !defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    (void)submission_latencies;
+#endif
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    bool partitioned =
+        config->accounting == ACCOUNTING_PARTITIONED;
+#endif
 
     result->attempted = config->tasks;
     for (producer = 0U; producer < config->producers; producer++) {
@@ -625,17 +843,71 @@ static bool validate_execution(
             || producers[producer].first_error != SCHEDULER_OK) {
             return false;
         }
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+        {
+            Statistics producer_statistics;
+            size_t attempted =
+                producers[producer].end - producers[producer].begin;
+            size_t latency_index;
+
+            if (!calculate_statistics(
+                    &submission_latencies[producers[producer].begin],
+                    attempted,
+                    &producer_statistics
+                )) {
+                return false;
+            }
+            result->producer_attempted[producer] = attempted;
+            result->producer_accepted[producer] =
+                producers[producer].accepted;
+            result->producer_rejected[producer] =
+                producers[producer].rejected;
+            for (latency_index = producers[producer].begin;
+                 latency_index < producers[producer].end;
+                 latency_index++) {
+                result->producer_submit_total_ns[producer] +=
+                    submission_latencies[latency_index];
+            }
+            result->producer_submit_min_ns[producer] =
+                producer_statistics.minimum;
+            result->producer_submit_max_ns[producer] =
+                producer_statistics.maximum;
+            result->producer_submit_p50_ns[producer] =
+                producer_statistics.p50;
+            result->producer_submit_p95_ns[producer] =
+                producer_statistics.p95;
+        }
+#endif
     }
-    result->executed = callback->execution_count;
-    if (callback->failure || callback->unknown_count != 0U
+    result->executed =
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+        partitioned
+            ? atomic_load(&callback->partitioned_execution_count)
+            :
+#endif
+        callback->execution_count;
+    if (
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+        (partitioned
+            ? atomic_load(&callback->partitioned_failure)
+            : callback->failure)
+        || (partitioned
+            ? atomic_load(&callback->partitioned_unknown_count)
+            : callback->unknown_count) != 0U
+        || (partitioned
+            ? atomic_load(&callback->partitioned_duplicate_count)
+            : callback->duplicate_count) != 0U
+#else
+        callback->failure || callback->unknown_count != 0U
         || callback->duplicate_count != 0U
+#endif
         || result->accepted != result->executed
         || result->attempted != result->accepted + result->rejected) {
         return false;
     }
     if (config->mode == MODE_VALIDATED) {
         for (index = 0U; index < config->tasks; index++) {
-            if (callback->execution_counts[index] != 1U
+            if (atomic_load(&callback->execution_counts[index]) != 1U
                 || completion_ticks[index] < submission_ticks[index]
                 || !benchmark_timer_duration_ns(
                     &callback->timer,
@@ -646,6 +918,37 @@ static bool validate_execution(
                 return false;
             }
         }
+    }
+    for (index = 0U; index < config->tasks; index++) {
+        uint64_t contribution =
+            callback->tasks[index].id
+            ^ UINT64_C(0x9e3779b97f4a7c15);
+        if (config->profile == PROFILE_LIGHT_CPU) {
+            contribution = deterministic_work(
+                contribution,
+                LIGHT_CPU_OPERATIONS
+            );
+        } else if (config->profile == PROFILE_MEDIUM_CPU) {
+            contribution = deterministic_work(
+                contribution,
+                MEDIUM_CPU_OPERATIONS
+            );
+        }
+        expected_checksum ^= contribution;
+    }
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    if (partitioned) {
+        for (index = 0U; index < config->workers; index++) {
+            observed_checksum ^= callback->worker_checksums[index];
+        }
+    } else {
+        observed_checksum = callback->checksum;
+    }
+#else
+    observed_checksum = callback->checksum;
+#endif
+    if (expected_checksum != observed_checksum) {
+        return false;
     }
     return true;
 }
@@ -659,7 +962,7 @@ static bool run_iteration(
     StartBarrier barrier;
     CallbackContext callback;
     Task *tasks = NULL;
-    unsigned int *execution_counts = NULL;
+    _Atomic unsigned int *execution_counts = NULL;
     uint64_t *submission_ticks = NULL;
     uint64_t *completion_ticks = NULL;
     uint64_t *submission_latencies = NULL;
@@ -708,6 +1011,7 @@ static bool run_iteration(
         goto cleanup;
     }
     for (index = 0U; index < config->tasks; index++) {
+        atomic_init(&execution_counts[index], 0U);
         if (!task_init(
                 &tasks[index],
                 (uint64_t)index + UINT64_C(1),
@@ -816,6 +1120,58 @@ static bool run_iteration(
     }
     scheduler_started = false;
     execution_count_after_join = callback.execution_count;
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    if (!scheduler_profiling_snapshot(&scheduler, &result->profiling)
+        || result->profiling.timing_failed
+        || result->profiling.counter_overflow) {
+        goto cleanup;
+    }
+    {
+        uint64_t total_tasks = 0U;
+        long double square_sum = 0.0L;
+        long double mean;
+
+        for (index = 0U; index < config->workers; index++) {
+            result->worker_tasks[index] = callback.worker_tasks[index];
+            result->worker_compute_ns[index] =
+                callback.worker_compute_ns[index];
+            result->worker_accounting_ns[index] =
+                callback.worker_accounting_ns[index];
+            result->worker_combined_ns[index] =
+                callback.worker_combined_ns[index];
+            result->worker_checksums[index] =
+                callback.worker_checksums[index];
+            result->callback_compute_total_ns +=
+                callback.worker_compute_ns[index];
+            result->callback_accounting_total_ns +=
+                callback.worker_accounting_ns[index];
+            result->callback_combined_total_ns +=
+                callback.worker_combined_ns[index];
+            total_tasks += callback.worker_tasks[index];
+            if (callback.worker_tasks[index] == 0U) {
+                result->zero_task_workers++;
+            }
+        }
+        if (total_tasks != (
+                config->accounting == ACCOUNTING_PARTITIONED
+                    ? atomic_load(&callback.partitioned_execution_count)
+                    : callback.execution_count
+            )) {
+            goto cleanup;
+        }
+        mean = (long double)total_tasks / (long double)config->workers;
+        for (index = 0U; index < config->workers; index++) {
+            long double difference =
+                (long double)result->worker_tasks[index] - mean;
+            square_sum += difference * difference;
+        }
+        result->worker_task_cv = mean == 0.0L
+            ? 0.0
+            : square_root(
+                (double)(square_sum / (long double)config->workers)
+            ) / (double)mean;
+    }
+#endif
     if (!benchmark_timer_duration_ns(
             &callback.timer,
             total_start,
@@ -845,6 +1201,7 @@ static bool run_iteration(
             &callback,
             producers,
             submission_ticks,
+            submission_latencies,
             completion_ticks,
             end_to_end,
             result
@@ -932,6 +1289,22 @@ static bool write_csv_row(
     char utc[UTC_BUFFER_SIZE];
     double throughput;
     int written;
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    const SchedulerProfilingSnapshot *profile = &result->profiling;
+    uint64_t enqueue_lock_ns;
+    uint64_t enqueue_lock_max_ns;
+    uint64_t dequeue_lock_ns;
+    uint64_t dequeue_lock_max_ns;
+    uint64_t enqueue_wait_ns;
+    uint64_t enqueue_wait_max_ns;
+    uint64_t dequeue_wait_ns;
+    uint64_t dequeue_wait_max_ns;
+    double occupancy_mean;
+#define PROFILE_TICKS_TO_NS(value) ((uint64_t)( \
+    ((long double)(value) * 1000000000.0L) \
+    / (long double)profile->timer_frequency \
+))
+#endif
 
     if (!benchmark_timer_utc(utc, sizeof(utc))
         || result->total_duration_ns == 0U) {
@@ -973,15 +1346,87 @@ static bool write_csv_row(
     if (config->mode == MODE_VALIDATED) {
         written = fprintf(
             file,
-            "%.3f,%" PRIu64 ",%" PRIu64 ",true\n",
+            "%.3f,%" PRIu64 ",%" PRIu64 ",",
             result->end_to_end_latency.mean,
             result->end_to_end_latency.p50,
             result->end_to_end_latency.p95
         );
     } else {
-        written = fprintf(file, ",,,true\n");
+        written = fprintf(file, ",,,");
     }
-    return written >= 0;
+    if (written < 0) {
+        return false;
+    }
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    if (profile->timer_frequency == 0U) {
+        return false;
+    }
+    enqueue_lock_ns = PROFILE_TICKS_TO_NS(profile->enqueue_lock_wait_ticks);
+    enqueue_lock_max_ns =
+        PROFILE_TICKS_TO_NS(profile->enqueue_lock_max_wait_ticks);
+    dequeue_lock_ns = PROFILE_TICKS_TO_NS(profile->dequeue_lock_wait_ticks);
+    dequeue_lock_max_ns =
+        PROFILE_TICKS_TO_NS(profile->dequeue_lock_max_wait_ticks);
+    enqueue_wait_ns = PROFILE_TICKS_TO_NS(profile->enqueue_wait_ticks);
+    enqueue_wait_max_ns =
+        PROFILE_TICKS_TO_NS(profile->enqueue_wait_max_ticks);
+    dequeue_wait_ns = PROFILE_TICKS_TO_NS(profile->dequeue_wait_ticks);
+    dequeue_wait_max_ns =
+        PROFILE_TICKS_TO_NS(profile->dequeue_wait_max_ticks);
+    occupancy_mean = profile->occupancy_sample_count == 0U
+        ? 0.0
+        : (double)profile->occupancy_sample_sum
+            / (double)profile->occupancy_sample_count;
+    written = fprintf(
+        file,
+        "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
+        "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
+        "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
+        "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
+        "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
+        "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
+        "%.6f,%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
+        "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%.9f,%zu,%s,",
+        profile->enqueue_lock_attempts,
+        enqueue_lock_ns,
+        enqueue_lock_max_ns,
+        profile->enqueue_inferred_contended,
+        profile->dequeue_lock_attempts,
+        dequeue_lock_ns,
+        dequeue_lock_max_ns,
+        profile->dequeue_inferred_contended,
+        profile->enqueue_wait_count,
+        enqueue_wait_ns,
+        enqueue_wait_max_ns,
+        profile->dequeue_wait_count,
+        dequeue_wait_ns,
+        dequeue_wait_max_ns,
+        profile->queue_full_observations,
+        profile->queue_empty_observations,
+        profile->not_empty_signals,
+        profile->not_full_signals,
+        profile->shutdown_broadcasts,
+        profile->enqueue_predicate_false_wakeups,
+        profile->dequeue_predicate_false_wakeups,
+        profile->occupancy_sample_count,
+        occupancy_mean,
+        profile->occupancy_min,
+        profile->occupancy_max,
+        profile->occupancy_zero_observations,
+        profile->occupancy_full_observations,
+        result->callback_compute_total_ns,
+        result->callback_accounting_total_ns,
+        result->callback_combined_total_ns,
+        result->worker_task_cv,
+        result->zero_task_workers,
+        accounting_name(config->accounting)
+    );
+    if (written < 0) {
+        return false;
+    }
+#undef PROFILE_TICKS_TO_NS
+#endif
+    return fprintf(file, "true\n") >= 0;
 }
 
 static void print_configuration(const BenchmarkConfig *config)
@@ -991,6 +1436,9 @@ static void print_configuration(const BenchmarkConfig *config)
         "  scenario: %s\n"
         "  callback profile: %s\n"
         "  mode: %s\n"
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+        "  accounting: %s\n"
+#endif
         "  workers: %zu\n"
         "  producers: %zu\n"
         "  capacity: %zu\n"
@@ -1003,6 +1451,9 @@ static void print_configuration(const BenchmarkConfig *config)
         config->scenario,
         profile_name(config->profile),
         mode_name(config->mode),
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+        accounting_name(config->accounting),
+#endif
         config->workers,
         config->producers,
         config->capacity,
@@ -1020,6 +1471,12 @@ static void print_configuration(const BenchmarkConfig *config)
         "unknown"
 #endif
     );
+#if defined(CONCURRENT_SCHEDULER_PROFILING_BUILD)
+    puts(
+        "  profiling build: enabled (benchmark-side and external "
+        "observation only)"
+    );
+#endif
 }
 
 static bool run_benchmark(const BenchmarkConfig *config)
@@ -1036,6 +1493,12 @@ static bool run_benchmark(const BenchmarkConfig *config)
     Statistics submit_stats;
     Statistics end_to_end_stats;
     FILE *output;
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    FILE *worker_output = NULL;
+    FILE *producer_output = NULL;
+    char worker_path[CSV_BUFFER_SIZE];
+    char producer_path[CSV_BUFFER_SIZE];
+#endif
     size_t index;
     bool success = false;
 
@@ -1064,10 +1527,56 @@ static bool run_benchmark(const BenchmarkConfig *config)
         fclose(output);
         goto cleanup;
     }
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    if (snprintf(
+            worker_path,
+            sizeof(worker_path),
+            "%s.workers.csv",
+            config->output
+        ) <= 0
+        || snprintf(
+            producer_path,
+            sizeof(producer_path),
+            "%s.producers.csv",
+            config->output
+        ) <= 0) {
+        fclose(output);
+        goto cleanup;
+    }
+    worker_output = fopen(worker_path, "w");
+    producer_output = fopen(producer_path, "w");
+    if (worker_output == NULL || producer_output == NULL
+        || fprintf(
+            worker_output,
+            "scenario,iteration,worker_index,tasks_dequeued,"
+            "tasks_executed,dequeue_wait_count,dequeue_wait_ns,"
+            "dequeue_lock_ns,callback_compute_ns,"
+            "callback_accounting_ns,callback_combined_ns,task_share\n"
+        ) < 0
+        || fprintf(
+            producer_output,
+            "scenario,iteration,producer_index,tasks_attempted,"
+            "tasks_accepted,tasks_rejected,submit_total_ns,"
+            "submit_min_ns,submit_max_ns,submit_p50_ns,submit_p95_ns\n"
+        ) < 0) {
+        if (worker_output != NULL) {
+            fclose(worker_output);
+        }
+        if (producer_output != NULL) {
+            fclose(producer_output);
+        }
+        fclose(output);
+        goto cleanup;
+    }
+#endif
     for (index = 0U; index < config->iterations; index++) {
         if (!run_iteration(config, &result)
             || !result.correctness_passed) {
             fprintf(stderr, "Measured iteration %zu failed.\n", index + 1U);
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+            fclose(worker_output);
+            fclose(producer_output);
+#endif
             fclose(output);
             goto cleanup;
         }
@@ -1084,9 +1593,85 @@ static bool run_benchmark(const BenchmarkConfig *config)
         end_to_end_means[index] =
             (uint64_t)result.end_to_end_latency.mean;
         if (!write_csv_row(output, config, index + 1U, &result)) {
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+            fclose(worker_output);
+            fclose(producer_output);
+#endif
             fclose(output);
             goto cleanup;
         }
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+        {
+            size_t item;
+
+            for (item = 0U; item < config->workers; item++) {
+                uint64_t wait_ns = (uint64_t)(
+                    ((long double)result.profiling
+                        .worker_dequeue_wait_ticks[item]
+                        * 1000000000.0L)
+                    / (long double)result.profiling.timer_frequency
+                );
+                uint64_t lock_ns = (uint64_t)(
+                    ((long double)result.profiling
+                        .worker_dequeue_lock_ticks[item]
+                        * 1000000000.0L)
+                    / (long double)result.profiling.timer_frequency
+                );
+                double share = result.executed == 0U
+                    ? 0.0
+                    : (double)result.worker_tasks[item]
+                        / (double)result.executed;
+
+                if (fprintf(
+                        worker_output,
+                        "%s,%zu,%zu,%" PRIu64 ",%" PRIu64 ","
+                        "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
+                        "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%.9f\n",
+                        config->scenario,
+                        index + 1U,
+                        item,
+                        result.profiling.worker_tasks[item],
+                        result.worker_tasks[item],
+                        result.profiling.worker_dequeue_wait_count[item],
+                        wait_ns,
+                        lock_ns,
+                        result.worker_compute_ns[item],
+                        result.worker_accounting_ns[item],
+                        result.worker_combined_ns[item],
+                        share
+                    ) < 0) {
+                    fclose(worker_output);
+                    fclose(producer_output);
+                    fclose(output);
+                    goto cleanup;
+                }
+            }
+            for (item = 0U; item < config->producers; item++) {
+                if (fprintf(
+                        producer_output,
+                        "%s,%zu,%zu,%" PRIu64 ",%" PRIu64 ","
+                        "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
+                        "%" PRIu64 ",%" PRIu64 ",%" PRIu64 "\n",
+                        config->scenario,
+                        index + 1U,
+                        item,
+                        result.producer_attempted[item],
+                        result.producer_accepted[item],
+                        result.producer_rejected[item],
+                        result.producer_submit_total_ns[item],
+                        result.producer_submit_min_ns[item],
+                        result.producer_submit_max_ns[item],
+                        result.producer_submit_p50_ns[item],
+                        result.producer_submit_p95_ns[item]
+                    ) < 0) {
+                    fclose(worker_output);
+                    fclose(producer_output);
+                    fclose(output);
+                    goto cleanup;
+                }
+            }
+        }
+#endif
         printf(
             "Iteration %zu: correctness=passed accepted=%zu executed=%zu "
             "rejected=%zu\n",
@@ -1096,7 +1681,13 @@ static bool run_benchmark(const BenchmarkConfig *config)
             result.rejected
         );
     }
-    if (fclose(output) != 0
+    if (
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+        fclose(worker_output) != 0
+        || fclose(producer_output) != 0
+        ||
+#endif
+        fclose(output) != 0
         || !calculate_statistics(
             throughputs,
             config->iterations,
@@ -1197,6 +1788,7 @@ static bool self_test(void)
         "throughput",
         PROFILE_NOOP,
         MODE_VALIDATED,
+        ACCOUNTING_STANDARD,
         1U,
         1U,
         2U,
@@ -1210,10 +1802,11 @@ static bool self_test(void)
     CallbackContext accounting;
     Task accounting_tasks[1];
     Task unknown_task;
-    unsigned int execution_counts[1] = {0U};
+    _Atomic unsigned int execution_counts[1];
     uint64_t completion_ticks[1] = {0U};
     bool accounting_initialized = false;
 
+    atomic_init(&execution_counts[0], 0U);
     if (!benchmark_timer_init(&timer)
         || !benchmark_timer_now(&timer, &start)
         || !benchmark_timer_now(&timer, &end)
@@ -1385,6 +1978,13 @@ static bool parse_arguments(
                 fprintf(stderr, "Unsupported mode: %s\n", value);
                 return false;
             }
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+        } else if (strcmp(option, "--accounting") == 0) {
+            if (!parse_accounting(value, &config->accounting)) {
+                fprintf(stderr, "Unsupported accounting mode: %s\n", value);
+                return false;
+            }
+#endif
         } else if (strcmp(option, "--output") == 0) {
             if (value[0] == '\0') {
                 return false;
@@ -1404,6 +2004,7 @@ int main(int argument_count, char **arguments)
         "throughput",
         PROFILE_NOOP,
         MODE_VALIDATED,
+        ACCOUNTING_STANDARD,
         DEFAULT_WORKERS,
         DEFAULT_PRODUCERS,
         DEFAULT_CAPACITY,

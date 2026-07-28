@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="500" viewBox="0 0 900 500">
+<rect width="100%" height="100%" fill="white"/>
+<text x="450.0" y="30" text-anchor="middle" font-family="sans-serif" font-size="20">Producer lock duration vs producers</text>
+<line x1="85" y1="60" x2="85" y2="410" stroke="#333"/>
+<line x1="85" y1="410" x2="875" y2="410" stroke="#333"/>
+<line x1="85" y1="410.0" x2="875" y2="410.0" stroke="#ddd"/>
+<text x="75" y="414.0" text-anchor="end" font-family="sans-serif" font-size="12">0</text>
+<line x1="85" y1="340.0" x2="875" y2="340.0" stroke="#ddd"/>
+<text x="75" y="344.0" text-anchor="end" font-family="sans-serif" font-size="12">49.5</text>
+<line x1="85" y1="270.0" x2="875" y2="270.0" stroke="#ddd"/>
+<text x="75" y="274.0" text-anchor="end" font-family="sans-serif" font-size="12">99</text>
+<line x1="85" y1="200.0" x2="875" y2="200.0" stroke="#ddd"/>
+<text x="75" y="204.0" text-anchor="end" font-family="sans-serif" font-size="12">148</text>
+<line x1="85" y1="130.0" x2="875" y2="130.0" stroke="#ddd"/>
+<text x="75" y="134.0" text-anchor="end" font-family="sans-serif" font-size="12">198</text>
+<line x1="85" y1="60.0" x2="875" y2="60.0" stroke="#ddd"/>
+<text x="75" y="64.0" text-anchor="end" font-family="sans-serif" font-size="12">247</text>
+<text x="216.7" y="434" text-anchor="middle" font-family="sans-serif" font-size="12">1</text>
+<rect x="121.9" y="349.7" width="187.6" height="60.3" fill="#2364aa"/>
+<text x="480.0" y="434" text-anchor="middle" font-family="sans-serif" font-size="12">2</text>
+<rect x="385.2" y="250.6" width="187.6" height="159.4" fill="#2364aa"/>
+<text x="743.3" y="434" text-anchor="middle" font-family="sans-serif" font-size="12">4</text>
+<rect x="648.5" y="97.5" width="187.6" height="312.5" fill="#2364aa"/>
+<text x="20" y="235.0" transform="rotate(-90 20 235.0)" text-anchor="middle" font-family="sans-serif" font-size="13">median cumulative ms</text>
+<rect x="95" y="470" width="14" height="14" fill="#2364aa"/>
+<text x="115" y="482" font-family="sans-serif" font-size="12">enqueue lock total (ms)</text>
+</svg>

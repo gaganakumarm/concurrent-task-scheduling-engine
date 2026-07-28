@@ -13,6 +13,12 @@ set(CMAKE_C_EXTENSIONS OFF)
 
 include(CTest)
 
+option(
+    CONCURRENT_SCHEDULER_ENABLE_PROFILING
+    "Enable benchmark-private contention profiling diagnostics"
+    OFF
+)
+
 function(concurrent_scheduler_enable_warnings target)
     if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(
@@ -268,6 +274,20 @@ if(WIN32)
             NOMINMAX
             BENCHMARK_VERSION="${PROJECT_VERSION}"
     )
+
+    if(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+        target_compile_definitions(
+            concurrent_scheduler_core
+            PRIVATE
+                CONCURRENT_SCHEDULER_ENABLE_PROFILING=1
+        )
+        target_compile_definitions(
+            concurrent_scheduler_benchmarks
+            PRIVATE
+                CONCURRENT_SCHEDULER_ENABLE_PROFILING=1
+                CONCURRENT_SCHEDULER_PROFILING_BUILD=1
+        )
+    endif()
 
     concurrent_scheduler_enable_warnings(
         concurrent_scheduler_benchmarks

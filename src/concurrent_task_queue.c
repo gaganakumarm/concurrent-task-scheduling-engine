@@ -4,13 +4,146 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+#include <string.h>
+#endif
+
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+#include "internal/scheduler_profiling.h"
+
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
 
 typedef struct {
     SchedMutex mutex;
     SchedCondition not_empty;
     SchedCondition not_full;
     bool shutdown_requested;
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    SchedulerProfilingSnapshot profiling;
+#endif
 } ConcurrentTaskQueueImplementation;
+
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+static _Thread_local size_t profiling_worker_index =
+    SCHEDULER_PROFILING_MAX_WORKERS;
+
+static uint64_t profiling_now(
+    ConcurrentTaskQueueImplementation *implementation
+)
+{
+    LARGE_INTEGER value;
+
+    if (!QueryPerformanceCounter(&value) || value.QuadPart < 0) {
+        implementation->profiling.timing_failed = true;
+        return 0U;
+    }
+    return (uint64_t)value.QuadPart;
+}
+
+static void profiling_add(
+    ConcurrentTaskQueueImplementation *implementation,
+    uint64_t *target,
+    uint64_t value
+)
+{
+    if (UINT64_MAX - *target < value) {
+        implementation->profiling.counter_overflow = true;
+    } else {
+        *target += value;
+    }
+}
+
+static void profiling_increment(
+    ConcurrentTaskQueueImplementation *implementation,
+    uint64_t *target
+)
+{
+    profiling_add(implementation, target, 1U);
+}
+
+static uint64_t profiling_elapsed(
+    ConcurrentTaskQueueImplementation *implementation,
+    uint64_t start,
+    uint64_t end
+)
+{
+    if (end < start) {
+        implementation->profiling.timing_failed = true;
+        return 0U;
+    }
+    return end - start;
+}
+
+static bool profiling_inferred_contended(
+    ConcurrentTaskQueueImplementation *implementation,
+    uint64_t start,
+    uint64_t end
+)
+{
+    uint64_t threshold =
+        implementation->profiling.timer_frequency / UINT64_C(1000000);
+
+    if (threshold == 0U) {
+        threshold = 1U;
+    }
+    return profiling_elapsed(implementation, start, end) > threshold;
+}
+
+static void profiling_record_duration(
+    ConcurrentTaskQueueImplementation *implementation,
+    uint64_t start,
+    uint64_t end,
+    uint64_t *total,
+    uint64_t *maximum
+)
+{
+    uint64_t duration = profiling_elapsed(implementation, start, end);
+
+    profiling_add(implementation, total, duration);
+    if (duration > *maximum) {
+        *maximum = duration;
+    }
+}
+
+static void profiling_record_occupancy(
+    ConcurrentTaskQueue *queue,
+    ConcurrentTaskQueueImplementation *implementation
+)
+{
+    uint64_t occupancy = (uint64_t)task_queue_size(&queue->queue);
+    uint64_t capacity = (uint64_t)task_queue_capacity(&queue->queue);
+    SchedulerProfilingSnapshot *profile = &implementation->profiling;
+
+    profiling_increment(implementation, &profile->occupancy_sample_count);
+    profiling_add(
+        implementation,
+        &profile->occupancy_sample_sum,
+        occupancy
+    );
+    if (profile->occupancy_sample_count == 1U
+        || occupancy < profile->occupancy_min) {
+        profile->occupancy_min = occupancy;
+    }
+    if (occupancy > profile->occupancy_max) {
+        profile->occupancy_max = occupancy;
+    }
+    if (occupancy == 0U) {
+        profiling_increment(
+            implementation,
+            &profile->occupancy_zero_observations
+        );
+    }
+    if (occupancy == capacity) {
+        profiling_increment(
+            implementation,
+            &profile->occupancy_full_observations
+        );
+    }
+}
+#endif
 
 static ConcurrentTaskQueueResult map_task_queue_result(TaskQueueResult result)
 {
@@ -65,6 +198,20 @@ ConcurrentTaskQueueResult concurrent_task_queue_init(
         task_queue_destroy(&temporary_queue);
         return CONCURRENT_TASK_QUEUE_ERROR_ALLOCATION;
     }
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    {
+        LARGE_INTEGER frequency;
+
+        if (!QueryPerformanceFrequency(&frequency)
+            || frequency.QuadPart <= 0) {
+            free(implementation);
+            task_queue_destroy(&temporary_queue);
+            return CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
+        }
+        implementation->profiling.timer_frequency =
+            (uint64_t)frequency.QuadPart;
+    }
+#endif
 
     sync_result = sched_mutex_init(&implementation->mutex);
     if (sync_result != SCHED_SYNC_OK) {
@@ -132,6 +279,13 @@ ConcurrentTaskQueueResult concurrent_task_queue_shutdown(
     }
 
     implementation->shutdown_requested = true;
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    profiling_add(
+        implementation,
+        &implementation->profiling.shutdown_broadcasts,
+        2U
+    );
+#endif
     if (sched_condition_broadcast(&implementation->not_empty)
         != SCHED_SYNC_OK) {
         synchronization_failed = true;
@@ -211,18 +365,68 @@ ConcurrentTaskQueueResult concurrent_task_queue_enqueue(
     TaskQueueResult queue_result;
     ConcurrentTaskQueueResult result;
     bool inserted = false;
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    uint64_t lock_start;
+    uint64_t lock_end;
+    uint64_t wait_start;
+    uint64_t wait_end;
+    bool waited = false;
+#endif
 
     if (queue == NULL || queue->implementation == NULL || task == NULL) {
         return CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT;
     }
 
     implementation = queue->implementation;
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    lock_start = profiling_now(implementation);
+#endif
     if (sched_mutex_lock(&implementation->mutex) != SCHED_SYNC_OK) {
         return CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
     }
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    lock_end = profiling_now(implementation);
+    profiling_increment(
+        implementation,
+        &implementation->profiling.enqueue_attempts
+    );
+    profiling_increment(
+        implementation,
+        &implementation->profiling.enqueue_lock_attempts
+    );
+    profiling_record_duration(
+        implementation,
+        lock_start,
+        lock_end,
+        &implementation->profiling.enqueue_lock_wait_ticks,
+        &implementation->profiling.enqueue_lock_max_wait_ticks
+    );
+    if (profiling_inferred_contended(
+            implementation,
+            lock_start,
+            lock_end
+        )) {
+        profiling_increment(
+            implementation,
+            &implementation->profiling.enqueue_inferred_contended
+        );
+    }
+#endif
 
     while (!implementation->shutdown_requested
         && task_queue_is_full(&queue->queue)) {
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+        waited = true;
+        profiling_increment(
+            implementation,
+            &implementation->profiling.queue_full_observations
+        );
+        profiling_increment(
+            implementation,
+            &implementation->profiling.enqueue_wait_count
+        );
+        wait_start = profiling_now(implementation);
+#endif
         if (sched_condition_wait(
                 &implementation->not_full,
                 &implementation->mutex
@@ -230,6 +434,28 @@ ConcurrentTaskQueueResult concurrent_task_queue_enqueue(
             (void)sched_mutex_unlock(&implementation->mutex);
             return CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
         }
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+        wait_end = profiling_now(implementation);
+        profiling_increment(
+            implementation,
+            &implementation->profiling.enqueue_wait_returns
+        );
+        profiling_record_duration(
+            implementation,
+            wait_start,
+            wait_end,
+            &implementation->profiling.enqueue_wait_ticks,
+            &implementation->profiling.enqueue_wait_max_ticks
+        );
+        if (!implementation->shutdown_requested
+            && task_queue_is_full(&queue->queue)) {
+            profiling_increment(
+                implementation,
+                &implementation->profiling
+                    .enqueue_predicate_false_wakeups
+            );
+        }
+#endif
     }
 
     if (implementation->shutdown_requested) {
@@ -240,6 +466,20 @@ ConcurrentTaskQueueResult concurrent_task_queue_enqueue(
         case TASK_QUEUE_OK:
             result = CONCURRENT_TASK_QUEUE_OK;
             inserted = true;
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+            if (waited) {
+                profiling_increment(
+                    implementation,
+                    &implementation->profiling.enqueue_successes_after_wait
+                );
+            } else {
+                profiling_increment(
+                    implementation,
+                    &implementation->profiling.enqueue_immediate_successes
+                );
+            }
+            profiling_record_occupancy(queue, implementation);
+#endif
             break;
         case TASK_QUEUE_ERROR_INVALID_ARGUMENT:
             result = CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT;
@@ -256,6 +496,14 @@ ConcurrentTaskQueueResult concurrent_task_queue_enqueue(
             != SCHED_SYNC_OK) {
         result = CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
     }
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    if (inserted) {
+        profiling_increment(
+            implementation,
+            &implementation->profiling.not_empty_signals
+        );
+    }
+#endif
 
     if (sched_mutex_unlock(&implementation->mutex) != SCHED_SYNC_OK) {
         return CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
@@ -332,18 +580,87 @@ ConcurrentTaskQueueResult concurrent_task_queue_dequeue(
     TaskQueueResult queue_result;
     ConcurrentTaskQueueResult result;
     bool removed = false;
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    uint64_t lock_start;
+    uint64_t lock_end;
+    uint64_t wait_start;
+    uint64_t wait_end;
+    bool waited = false;
+    size_t worker_index;
+#endif
 
     if (queue == NULL || queue->implementation == NULL || task == NULL) {
         return CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT;
     }
 
     implementation = queue->implementation;
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    worker_index = profiling_worker_index;
+    lock_start = profiling_now(implementation);
+#endif
     if (sched_mutex_lock(&implementation->mutex) != SCHED_SYNC_OK) {
         return CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
     }
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    lock_end = profiling_now(implementation);
+    profiling_increment(
+        implementation,
+        &implementation->profiling.dequeue_attempts
+    );
+    profiling_increment(
+        implementation,
+        &implementation->profiling.dequeue_lock_attempts
+    );
+    profiling_record_duration(
+        implementation,
+        lock_start,
+        lock_end,
+        &implementation->profiling.dequeue_lock_wait_ticks,
+        &implementation->profiling.dequeue_lock_max_wait_ticks
+    );
+    if (profiling_inferred_contended(
+            implementation,
+            lock_start,
+            lock_end
+        )) {
+        profiling_increment(
+            implementation,
+            &implementation->profiling.dequeue_inferred_contended
+        );
+    }
+    if (worker_index < SCHEDULER_PROFILING_MAX_WORKERS) {
+        profiling_add(
+            implementation,
+            &implementation->profiling.worker_dequeue_lock_ticks[
+                worker_index
+            ],
+            profiling_elapsed(implementation, lock_start, lock_end)
+        );
+    }
+#endif
 
     while (!implementation->shutdown_requested
         && task_queue_is_empty(&queue->queue)) {
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+        waited = true;
+        profiling_increment(
+            implementation,
+            &implementation->profiling.queue_empty_observations
+        );
+        profiling_increment(
+            implementation,
+            &implementation->profiling.dequeue_wait_count
+        );
+        if (worker_index < SCHEDULER_PROFILING_MAX_WORKERS) {
+            profiling_increment(
+                implementation,
+                &implementation->profiling.worker_dequeue_wait_count[
+                    worker_index
+                ]
+            );
+        }
+        wait_start = profiling_now(implementation);
+#endif
         if (sched_condition_wait(
                 &implementation->not_empty,
                 &implementation->mutex
@@ -351,6 +668,37 @@ ConcurrentTaskQueueResult concurrent_task_queue_dequeue(
             (void)sched_mutex_unlock(&implementation->mutex);
             return CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
         }
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+        wait_end = profiling_now(implementation);
+        profiling_increment(
+            implementation,
+            &implementation->profiling.dequeue_wait_returns
+        );
+        profiling_record_duration(
+            implementation,
+            wait_start,
+            wait_end,
+            &implementation->profiling.dequeue_wait_ticks,
+            &implementation->profiling.dequeue_wait_max_ticks
+        );
+        if (worker_index < SCHEDULER_PROFILING_MAX_WORKERS) {
+            profiling_add(
+                implementation,
+                &implementation->profiling.worker_dequeue_wait_ticks[
+                    worker_index
+                ],
+                profiling_elapsed(implementation, wait_start, wait_end)
+            );
+        }
+        if (!implementation->shutdown_requested
+            && task_queue_is_empty(&queue->queue)) {
+            profiling_increment(
+                implementation,
+                &implementation->profiling
+                    .dequeue_predicate_false_wakeups
+            );
+        }
+#endif
     }
 
     if (task_queue_is_empty(&queue->queue)) {
@@ -362,6 +710,26 @@ ConcurrentTaskQueueResult concurrent_task_queue_dequeue(
         case TASK_QUEUE_OK:
             result = CONCURRENT_TASK_QUEUE_OK;
             removed = true;
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+            if (waited) {
+                profiling_increment(
+                    implementation,
+                    &implementation->profiling.dequeue_successes_after_wait
+                );
+            } else {
+                profiling_increment(
+                    implementation,
+                    &implementation->profiling.dequeue_immediate_successes
+                );
+            }
+            if (worker_index < SCHEDULER_PROFILING_MAX_WORKERS) {
+                profiling_increment(
+                    implementation,
+                    &implementation->profiling.worker_tasks[worker_index]
+                );
+            }
+            profiling_record_occupancy(queue, implementation);
+#endif
             break;
         case TASK_QUEUE_ERROR_INVALID_ARGUMENT:
             result = CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT;
@@ -378,6 +746,14 @@ ConcurrentTaskQueueResult concurrent_task_queue_dequeue(
             != SCHED_SYNC_OK) {
         result = CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
     }
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    if (removed) {
+        profiling_increment(
+            implementation,
+            &implementation->profiling.not_full_signals
+        );
+    }
+#endif
 
     if (sched_mutex_unlock(&implementation->mutex) != SCHED_SYNC_OK) {
         result = CONCURRENT_TASK_QUEUE_ERROR_SYSTEM;
@@ -516,6 +892,34 @@ size_t concurrent_task_queue_capacity(ConcurrentTaskQueue *queue)
     (void)sched_mutex_unlock(&implementation->mutex);
     return result;
 }
+
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+void concurrent_task_queue_profiling_set_worker_index(size_t worker_index)
+{
+    profiling_worker_index = worker_index;
+}
+
+bool concurrent_task_queue_profiling_snapshot(
+    ConcurrentTaskQueue *queue,
+    size_t worker_count,
+    SchedulerProfilingSnapshot *snapshot
+)
+{
+    ConcurrentTaskQueueImplementation *implementation;
+
+    if (queue == NULL || queue->implementation == NULL || snapshot == NULL
+        || worker_count > SCHEDULER_PROFILING_MAX_WORKERS) {
+        return false;
+    }
+    implementation = queue->implementation;
+    if (sched_mutex_lock(&implementation->mutex) != SCHED_SYNC_OK) {
+        return false;
+    }
+    implementation->profiling.worker_count = worker_count;
+    memcpy(snapshot, &implementation->profiling, sizeof(*snapshot));
+    return sched_mutex_unlock(&implementation->mutex) == SCHED_SYNC_OK;
+}
+#endif
 
 const char *concurrent_task_queue_result_name(
     ConcurrentTaskQueueResult result

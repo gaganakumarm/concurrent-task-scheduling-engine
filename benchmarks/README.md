@@ -182,3 +182,27 @@ establish universal scalability, worker utilization, causality when multiple
 variables change, or a production optimization opportunity. Memory usage and
 CPU time are not reported because this checkpoint has no validated portable
 measurement mechanism for them.
+
+## Contention profiling build
+
+Checkpoint 5.3 may configure a separate diagnostic build with
+`-DCONCURRENT_SCHEDULER_ENABLE_PROFILING=ON`. The option defaults to `OFF` and
+is scoped privately to the scheduler implementation and benchmark executable.
+Normal builds compile no profiling fields or profiling code, and the public API
+and ordinary CSV schema remain unchanged. Profiling builds expose only a
+private post-join snapshot to the benchmark and add queue-lock acquisition,
+condition waiting/signaling, event-sampled occupancy, and per-worker counters.
+An acquisition is conservatively classified as inferred contention only when
+its measured duration exceeds one microsecond; nonzero QPC deltas at or below
+that threshold are not called contention.
+
+Profiling mode also accepts `--accounting standard` (the default exact,
+mutex-protected callback accounting) and `--accounting partitioned` (exact
+per-Task atomic execution counts plus per-worker reduction). Both retain
+duplicate and unknown-pointer detection, exact accepted/executed validation,
+and deterministic checksum verification. Profiling primary CSVs gain the
+documented diagnostic columns, with `.workers.csv` and `.producers.csv`
+companions. Occupancy is sampled after successful enqueue/dequeue mutations;
+its mean is event-sampled, not time-weighted. Cumulative lock and callback
+durations are concurrent thread-time, so ratios against wall time can exceed
+100% and must not be added as a wall-time decomposition.

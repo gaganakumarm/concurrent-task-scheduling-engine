@@ -2,6 +2,11 @@
 
 #include "concurrent_scheduler/concurrent_task_queue.h"
 #include "platform/sync.h"
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+#include "internal/scheduler_profiling.h"
+static _Thread_local size_t scheduler_profiling_worker_index =
+    SCHEDULER_PROFILING_MAX_WORKERS;
+#endif
 
 #include <stdint.h>
 #include <stdlib.h>
@@ -158,6 +163,10 @@ static int scheduler_worker_entry(void *argument)
     }
 
     implementation = context->scheduler;
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+    scheduler_profiling_worker_index = context->worker_index;
+    concurrent_task_queue_profiling_set_worker_index(context->worker_index);
+#endif
     if (sched_mutex_lock(&implementation->worker_mutex) != SCHED_SYNC_OK) {
         return WORKER_RESULT_SYNCHRONIZATION;
     }
@@ -746,3 +755,32 @@ const char *scheduler_result_name(SchedulerResult result)
         return "UNKNOWN";
     }
 }
+
+#if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
+bool scheduler_profiling_snapshot(
+    Scheduler *scheduler,
+    SchedulerProfilingSnapshot *snapshot
+)
+{
+    SchedulerImplementation *implementation;
+
+    if (scheduler == NULL || scheduler->implementation == NULL
+        || snapshot == NULL) {
+        return false;
+    }
+    implementation = scheduler->implementation;
+    if (implementation->state != SCHEDULER_STATE_STOPPED) {
+        return false;
+    }
+    return concurrent_task_queue_profiling_snapshot(
+        &implementation->queue,
+        implementation->worker_count,
+        snapshot
+    );
+}
+
+size_t scheduler_profiling_current_worker_index(void)
+{
+    return scheduler_profiling_worker_index;
+}
+#endif
