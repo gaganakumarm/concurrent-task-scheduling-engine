@@ -1,0 +1,85 @@
+cmake_minimum_required(VERSION 3.20)
+
+project(
+    concurrent-task-scheduling-engine
+    VERSION 0.1.0
+    DESCRIPTION "Concurrent Task Scheduling Engine in C"
+    LANGUAGES C
+)
+
+set(CMAKE_C_STANDARD 17)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
+
+include(CTest)
+
+function(concurrent_scheduler_enable_warnings target)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(
+            "${target}"
+            PRIVATE
+                -Wall
+                -Wextra
+                -Wpedantic
+                -Wconversion
+        )
+    elseif(MSVC)
+        target_compile_options("${target}" PRIVATE /W4)
+    endif()
+endfunction()
+
+add_library(
+    concurrent_scheduler_core
+    src/concurrent_scheduler.c
+)
+
+target_include_directories(
+    concurrent_scheduler_core
+    PUBLIC
+        "${PROJECT_SOURCE_DIR}/include"
+)
+
+target_compile_definitions(
+    concurrent_scheduler_core
+    PRIVATE
+        CONCURRENT_SCHEDULER_VERSION="${PROJECT_VERSION}"
+)
+
+concurrent_scheduler_enable_warnings(concurrent_scheduler_core)
+
+add_executable(
+    concurrent-task-scheduling-engine
+    src/main.c
+)
+
+target_link_libraries(
+    concurrent-task-scheduling-engine
+    PRIVATE
+        concurrent_scheduler_core
+)
+
+concurrent_scheduler_enable_warnings(concurrent-task-scheduling-engine)
+
+add_executable(
+    concurrent_scheduler_tests
+    tests/test_concurrent_scheduler.c
+)
+
+target_link_libraries(
+    concurrent_scheduler_tests
+    PRIVATE
+        concurrent_scheduler_core
+)
+
+target_compile_definitions(
+    concurrent_scheduler_tests
+    PRIVATE
+        CONCURRENT_SCHEDULER_EXPECTED_VERSION="${PROJECT_VERSION}"
+)
+
+concurrent_scheduler_enable_warnings(concurrent_scheduler_tests)
+
+add_test(
+    NAME concurrent_scheduler.foundation
+    COMMAND concurrent_scheduler_tests
+)

@@ -1,0 +1,40 @@
+# C and compiler artifacts
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.exe
+*.pdb
+
+# CMake and test artifacts
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+compile_commands.json
+
+# Windows and MSYS2 artifacts
+Thumbs.db
+Desktop.ini
+*.stackdump
+
+# Editors and IDEs
+.vscode/
+.idea/
+*.swp
+*~
+
+# Generated benchmark output
+benchmarks/results/
+benchmarks/output/
+
+# Temporary files and logs
+*.log
+*.tmp
+*.temp
+
