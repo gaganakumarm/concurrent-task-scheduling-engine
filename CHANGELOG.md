@@ -42,5 +42,5 @@
   callback crash containment.
 - ASan, UBSan, and TSan runtimes were unavailable in the validated toolchain.
 
-The historical `v0.5-performance-engineering` tag records an engineering
-milestone rather than this first complete public release.
+A later update may introduce broader functionality beyond this first complete
+public release.
