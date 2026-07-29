@@ -106,6 +106,10 @@ as a material tiny-Task bottleneck. A signal-reduction candidate was honestly
 rejected after violating a medium-workload safeguard, preserving validated
 default behavior.
 
+Phase 6 reliability and observability architecture is in progress. Runtime
+snapshots, fault injection, recovery, and watchdog behavior are not yet
+implemented.
+
 ## Planned Architecture
 
 ```text
