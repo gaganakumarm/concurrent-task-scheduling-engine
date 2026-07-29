@@ -9,7 +9,7 @@
 *.pdb
 
 # CMake and test artifacts
-build/
+/build*/
 cmake-build-*/
 CMakeFiles/
 CMakeCache.txt
