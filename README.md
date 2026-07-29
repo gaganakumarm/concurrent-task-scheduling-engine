@@ -1,170 +1,317 @@
 # Concurrent Task Scheduling Engine
 
-A production-ready C17 bounded task scheduler for Windows with a fixed worker pool,
-multi-producer submission, deterministic shutdown and join, private runtime
-accounting, lifecycle validation, fault-injection testing, and reproducible
-performance evidence.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![C17](https://img.shields.io/badge/C-17-blue.svg)
+![CMake](https://img.shields.io/badge/CMake-%E2%89%A53.20-064F8C.svg)
+![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078D4.svg)
+[![Release: v1.0.0](https://img.shields.io/badge/release-v1.0.0-blue.svg)](docs/releases/v1.0.0.md)
 
-## Key capabilities
+A C17 library for executing caller-owned Tasks on a fixed-size worker pool. It
+provides a bounded FIFO, blocking and non-blocking submission, explicit
+lifecycle control, and graceful draining during shutdown.
 
-- Caller-owned tasks with validated states, priorities, and work accounting
-- Fixed-capacity FIFO and synchronized blocking queue
-- Fixed-size worker pool with blocking and non-blocking submission
+The project focuses on behavior that is difficult to get right in concurrent C
+software: ownership, shutdown races, partial startup, worker cleanup, exact
+runtime accounting, and evidence-based performance analysis. Its public API is
+independent of native threading types; the supported backend uses Windows
+critical sections, condition variables, and `_beginthreadex`.
+
+## Why this project?
+
+- Make concurrency behavior explicit and deterministic.
+- Preserve accepted work across graceful shutdown.
+- Separate Task ownership, queue storage, worker lifecycle, and platform code.
+- Exercise synchronization and failure paths without timing-dependent tests.
+- Validate performance claims with reproducible, correctness-gated benchmarks.
+- Provide an installable C library with a small, documented public API.
+
+## Table of Contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+- [Repository Structure](#repository-structure)
+- [Build](#build)
+- [Running Tests](#running-tests)
+- [Running Benchmarks](#running-benchmarks)
+- [Performance Analysis](#performance-analysis)
+- [Documentation](#documentation)
+- [Project Highlights](#project-highlights)
+- [Design Principles](#design-principles)
+- [License](#license)
+
+## Features
+
+- C17 implementation with compiler extensions disabled
+- Caller-owned Tasks with validated states, priority metadata, and work
+  accounting
+- Fixed-capacity FIFO with synchronized multi-producer, multi-consumer access
+- Fixed-size worker pool with readiness coordination and blocking or
+  non-blocking submission
 - Explicit initialize, start, shutdown, join, and destroy lifecycle
-- Exact callback success/failure and worker accounting
-- Private snapshots, derived health, and invariant validation
+- Graceful shutdown that rejects new submissions and drains accepted Tasks
+- Exact submission, queue, worker, and callback accounting with private
+  snapshot validation and derived health
 - Compile-time-gated deterministic fault injection and contention profiling
-- Release benchmark with deterministic callback workloads and CSV output
+- Deterministic benchmark workloads with high-resolution Windows timing and
+  CSV output
+- Platform-neutral public headers with an isolated Windows synchronization
+  backend
+- Strict-warning CMake builds, seven normal CTests, installable libraries,
+  public headers, and package metadata
 
 ## Architecture
 
 ```text
-Producer(s) -> Scheduler -> Bounded synchronized FIFO -> Worker pool
-                                                        -> User callback
+                         caller-owned Task objects
+                                  │
+Task producers                    │
+      │                           │
+      ▼                           │
+Scheduler submission gate        │
+      │                           │
+      ▼                           │
+ConcurrentTaskQueue ──────────────┘
+  ├── mutex
+  ├── not-empty condition
+  ├── not-full condition
+  └── graceful shutdown state
+      │
+      ▼
+Bounded TaskQueue
+  └── circular FIFO of non-owning Task pointers
+      │
+      ▼
+Fixed worker pool
+      │
+      ▼
+Caller callbacks
+      │
+      ▼
+Task outcomes and private runtime accounting
+      │
+      ▼
+Snapshot validation and derived health
 ```
 
-Tasks and callback contexts remain caller-owned. Workers execute callbacks
-without holding scheduler queue or lifecycle locks. The supported backend uses
-Windows critical sections, condition variables, and `_beginthreadex`.
+The scheduler owns its queue, worker resources, synchronization objects, and
+private accounting. It borrows every Task, callback, and callback context.
+Callbacks execute without scheduler lifecycle or queue locks and may run
+concurrently.
 
-See [architecture.md](docs/architecture.md) and
-[threading-architecture.md](docs/threading-architecture.md).
+```text
+initialize → start → submit → shutdown → join → destroy
+```
 
-## Reliability and observability
+Shutdown closes submission, wakes blocked operations, and preserves accepted
+Tasks for FIFO draining. Successful join guarantees that no callback remains
+active. Task priority is metadata and does not change FIFO ordering.
 
-Private runtime snapshots expose exact lifecycle-domain accounting to internal
-tests without expanding the public API. Validation detects structural and
-quiescent invariant violations and derives deterministic health states.
-Fault-injection tests cover allocation failure, partial worker startup, join
-failure, lifecycle misuse, and repeated cleanup. Fault injection is OFF by
-default.
+For more information, see [Architecture](docs/architecture.md) and
+[Threading architecture](docs/threading-architecture.md).
 
-See the [scheduler reliability report](docs/reliability-report.md).
+## Repository Structure
 
-## Performance summary
+| Path | Purpose |
+|---|---|
+| `include/concurrent_scheduler/` | Installed public C API |
+| `src/` | Task, queue, scheduler, validation, and version implementation |
+| `src/internal/` | Private observability, profiling, and fault interfaces |
+| `src/platform/` | Internal synchronization abstraction |
+| `src/platform/windows/` | Windows synchronization backend |
+| `tests/` | Deterministic unit, concurrency, lifecycle, and failure tests |
+| `benchmarks/` | Benchmark executable, Windows timer, and methodology |
+| `results/` | Committed baseline, profiling, and experiment evidence |
+| `scripts/` | Build validation and report-asset generation |
+| `tools/` | General benchmark CSV analysis |
+| `docs/` | Architecture, performance, reliability, and release guides |
+| `cmake/` | Installed-package configuration template |
 
-On the documented Windows 11 system with an Intel i5-1155G7, four producers,
-capacity 64, and 100,000 no-op tasks, median throughput peaked near four
-workers at 1.26 million tasks/s. Medium and heavy deterministic CPU workloads
-continued scaling through eight logical workers. These configuration-specific
-measurements are not cross-machine guarantees. The shared bounded queue remains
-the measured tiny-task bottleneck.
+Only headers under `include/concurrent_scheduler/` are public. Files under
+`src/internal/` and `src/platform/` are private and are not installed.
 
-See the
-[performance evaluation summary](docs/performance-evaluation-summary.md).
+## Build
 
-## Build requirements
+### Requirements
 
 - Windows 11 or a compatible Windows environment
 - CMake 3.20 or newer
 - C17 compiler
-- MinGW Makefiles and GCC were used for release validation
+- MSYS2 UCRT64/MinGW Makefiles for the documented build
 
-Linux and macOS have not been validated. C++ linkage compatibility is not
-currently promised.
+Linux and macOS are not supported because the repository provides only a
+Windows synchronization backend.
 
-## Quick start
+### Release
 
 ```powershell
-cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
-cmake --build build
-.\build\concurrent-task-scheduling-engine.exe
+cmake -S . -B build-release -G "MinGW Makefiles" `
+  -DCMAKE_BUILD_TYPE=Release
+cmake --build build-release
+```
+
+Run the demonstration executable:
+
+```powershell
+.\build-release\concurrent-task-scheduling-engine.exe
 ```
 
 Expected output includes:
 
 ```text
+Version: 1.0.0
 Status: initialized
 ```
 
-## Running tests
+### Debug
 
 ```powershell
-ctest --test-dir build -N
-ctest --test-dir build --output-on-failure
+cmake -S . -B build-debug -G "MinGW Makefiles" `
+  -DCMAKE_BUILD_TYPE=Debug
+cmake --build build-debug
 ```
 
-The normal build registers exactly seven tests.
-
-## Running benchmarks
+### Installation
 
 ```powershell
-.\build\concurrent_scheduler_benchmarks.exe --self-test
-.\build\concurrent_scheduler_benchmarks.exe `
-  --scenario throughput --workers 4 --producers 4 --capacity 64 `
-  --tasks 100000 --warmup 1 --iterations 15 `
-  --callback-profile noop --output build\benchmark.csv
+cmake --install build-release --prefix build-install
 ```
 
-Keep generated measurements in ignored build directories. See
-[benchmarks/README.md](benchmarks/README.md) for the complete CLI and schema.
+The installation contains the static scheduler and synchronization libraries,
+public headers, MIT License, exported targets, and CMake package files.
 
-## Optional build features
+An installed consumer can use:
 
-Profiling Release:
+```cmake
+find_package(ConcurrentScheduler 1.0 REQUIRED)
+
+target_link_libraries(
+    my_program
+    PRIVATE
+        ConcurrentScheduler::concurrent_scheduler
+)
+```
+
+The umbrella header exposes the complete API:
+
+```c
+#include <concurrent_scheduler/concurrent_scheduler.h>
+```
+
+Granular Task, queue, and scheduler headers remain available for narrower
+includes.
+
+## Running Tests
+
+Run the seven normal CTests:
 
 ```powershell
-cmake -S . -B build-profile -G "MinGW Makefiles" `
-  -DCMAKE_BUILD_TYPE=Release `
-  -DCONCURRENT_SCHEDULER_ENABLE_PROFILING=ON
+ctest --test-dir build-release --output-on-failure
 ```
 
-Fault-injection Debug:
+| Test | Coverage |
+|---|---|
+| `concurrent_scheduler.foundation` | Runtime version and link integration |
+| `concurrent_scheduler.task_domain` | Task validation, transitions, and work accounting |
+| `concurrent_scheduler.task_queue` | FIFO behavior, ownership, failures, and wraparound |
+| `concurrent_scheduler.synchronization_backend` | Mutex, condition, broadcast, and thread operations |
+| `concurrent_scheduler.concurrent_task_queue` | Multi-producer/consumer coordination, blocking, and shutdown |
+| `concurrent_scheduler.scheduler` | Worker lifecycle, submission, callbacks, draining, and cleanup |
+| `concurrent_scheduler.observability` | Snapshots, overflow, invariants, diagnostics, and health |
+
+Concurrency tests use mutexes, condition variables, protected predicates, and
+thread joins rather than arbitrary sleeps as correctness oracles.
+
+### Fault-injection build
 
 ```powershell
 cmake -S . -B build-fault -G "MinGW Makefiles" `
   -DCMAKE_BUILD_TYPE=Debug `
   -DCONCURRENT_SCHEDULER_ENABLE_FAULT_INJECTION=ON
+cmake --build build-fault
+ctest --test-dir build-fault --output-on-failure
 ```
 
-Both options and the rejected transition-aware signaling experiment default to
-OFF.
+This configuration adds `concurrent_scheduler.fault_injection`. It
+deterministically exercises worker-array allocation failure, partial worker
+creation, join-result rejection, cleanup, retry, counter overflow, and wrapper
+reuse. Fault injection is private, instance-scoped, disabled by default, and
+compiled out of normal builds.
 
-## Installation
+## Running Benchmarks
+
+Run the Release benchmark self-test:
 
 ```powershell
-cmake --install build --prefix build-install
+.\build-release\concurrent_scheduler_benchmarks.exe --self-test
 ```
 
-This installs the static library, public headers, and CMake package metadata.
-Internal headers, tests, benchmarks, profiling controls, and fault controls are
-not installed.
+Example validated throughput run:
 
-An installed CMake consumer can use:
-
-```cmake
-find_package(ConcurrentScheduler 1.0 REQUIRED)
-target_link_libraries(my_program PRIVATE
-    ConcurrentScheduler::concurrent_scheduler)
+```powershell
+.\build-release\concurrent_scheduler_benchmarks.exe `
+  --scenario throughput `
+  --workers 4 `
+  --producers 4 `
+  --capacity 64 `
+  --tasks 100000 `
+  --warmup 2 `
+  --iterations 10 `
+  --callback-profile noop `
+  --mode validated `
+  --output build-release\benchmark.csv
 ```
 
-## Minimal usage
+The harness provides no-op, deterministic light and medium CPU, and controlled
+blocking callback profiles. It writes one CSV row per measured iteration;
+warm-ups are discarded.
 
-```c
-#include <concurrent_scheduler/concurrent_scheduler.h>
-#include <stdio.h>
+CSV output includes configuration, Task accounting, throughput, submission and
+end-to-end latency, lifecycle duration, and correctness. Applicable builds add
+runtime health or private contention fields. Validated mode rejects duplicate
+or unknown Tasks, accounting mismatches, lifecycle failures, and callbacks
+observed after join.
 
-int main(void)
-{
-    printf("%s\n", concurrent_scheduler_version());
-    return 0;
-}
-```
+For the complete CLI, schema, timing boundaries, and reproducibility guidance,
+see [Benchmark methodology](benchmarks/README.md).
 
-See the public headers for scheduler ownership and lifecycle contracts.
-
-## Project structure
+## Performance Analysis
 
 ```text
-include/concurrent_scheduler/  Public C API
-src/                           Core and Windows backend
-tests/                         Deterministic test executables
-benchmarks/                    Benchmark harness
-tools/ and scripts/            Analysis utilities
-docs/                          Architecture and validation evidence
+results/
+├── baseline/      Ordinary Release measurements
+├── profiling/     Queue, worker, producer, and accounting diagnostics
+└── optimization/  Paired control and experimental measurements
 ```
 
+The transition-aware signaling experiment reduced signal counts but failed the
+complete workload safeguard and remains disabled. Published conclusions and
+measurement limitations are summarized in
+[Performance evaluation](docs/performance-evaluation-summary.md).
+
+Analyze compatible benchmark CSVs with:
+
+```powershell
+python tools\analyze_benchmark.py `
+  build-release\benchmark.csv `
+  --output build-release\benchmark-summary.csv
+```
+
+The tool rejects failed correctness, overflow, incomplete validation, invariant
+violations, and non-stopped terminal health. It reports median, range, mean,
+population standard deviation, coefficient of variation, p50/p95 duration, and
+queue high-water mark.
+
+- `scripts/` validates fixed evidence sets, regenerates report assets, and
+  rebuilds known configurations.
+- `tools/` analyzes caller-selected compatible CSV files.
+
+Measurements describe the documented Windows host and configurations; they are
+not cross-machine performance guarantees.
+
 ## Documentation
+
+Public API contracts are documented directly in the installed headers under
+`include/concurrent_scheduler/`.
 
 - [Architecture](docs/architecture.md)
 - [Threading architecture](docs/threading-architecture.md)
@@ -174,22 +321,35 @@ docs/                          Architecture and validation evidence
 - [Robustness and static analysis](docs/robustness-and-static-analysis.md)
 - [v1.0.0 release notes](docs/releases/v1.0.0.md)
 
-## Known limitations
+Performance and contention charts are stored under
+`docs/images/performance/` and `docs/images/contention-profiling/`.
 
-- Windows is the only validated platform.
-- The scheduler uses a shared bounded FIFO; there is no work stealing,
-  priority scheduling, dynamic scaling, persistence, or process isolation.
-- There are no real-time guarantees.
-- Callbacks own their memory safety, synchronization, and crash behavior.
-- ASan, UBSan, and TSan runtimes were unavailable in the validated MinGW
-  installation; no dynamic-sanitizer coverage is claimed.
-- Fault injection and profiling are private compile-time diagnostics.
+## Project Highlights
 
-## Release
+- Layered Task, FIFO, synchronized queue, scheduler, and platform-backend
+  implementation
+- Namespaced public headers with opaque scheduler and native synchronization
+  boundaries
+- Fixed worker pool with readiness coordination and graceful queue draining
+- Submission gate that coordinates concurrent producers with shutdown
+- Callbacks executed outside scheduler locks
+- Private snapshots with exact domain accounting and quiescent invariants
+- Saturating counters with explicit overflow reporting
+- Deterministic synchronization and failure-path tests
+- Correctness-gated benchmarks with committed raw evidence
+- Strict-warning C17 build with installation and package-consumer support
 
-The current release is **1.0.0**. CMake `project(VERSION ...)` remains the
-canonical source for runtime reporting, tests, and benchmark metadata. The
-repository tag is `v1.0.0`.
+## Design Principles
+
+- **Explicit ownership:** callers retain Tasks and callback data; containers own
+  only their internal resources.
+- **Deterministic lifecycle:** startup, shutdown, joining, and destruction have
+  distinct contracts.
+- **Minimal public API:** platform and diagnostic details remain private.
+- **Synchronization by predicate:** blocking operations recheck protected state
+  rather than relying on wake-up order.
+- **Reproducible evidence:** tests and benchmarks validate correctness before
+  reporting results.
 
 ## License
 
