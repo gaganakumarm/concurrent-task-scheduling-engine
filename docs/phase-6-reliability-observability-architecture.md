@@ -388,3 +388,9 @@ per-instance fault injection only when explicitly enabled, and separate
 reliability validation from performance benchmarks. Checkpoint 6.2 may
 implement only the minimal required counters and private snapshot after a
 lock-order and overhead review.
+
+Checkpoint 6.2 implementation note: snapshot version 1 now implements the
+hybrid lifecycle → worker/per-worker-atomic → queue capture order. Callback
+outcomes use cache-line-aligned, lock-free, single-writer C17 atomic slots to
+avoid a new callback mutex acquisition. The interface remains private; health
+thresholds, invariant enforcement, and fault injection remain unimplemented.

@@ -253,6 +253,34 @@ if(WIN32)
     )
 
     add_executable(
+        concurrent_scheduler_observability_tests
+        tests/test_scheduler_observability.c
+    )
+
+    target_include_directories(
+        concurrent_scheduler_observability_tests
+        PRIVATE
+            "${PROJECT_SOURCE_DIR}/src"
+            "${PROJECT_SOURCE_DIR}/src/platform"
+    )
+
+    target_link_libraries(
+        concurrent_scheduler_observability_tests
+        PRIVATE
+            concurrent_scheduler_core
+            concurrent_scheduler_platform_sync
+    )
+
+    concurrent_scheduler_enable_warnings(
+        concurrent_scheduler_observability_tests
+    )
+
+    add_test(
+        NAME concurrent_scheduler.observability
+        COMMAND concurrent_scheduler_observability_tests
+    )
+
+    add_executable(
         concurrent_scheduler_benchmarks
         benchmarks/benchmark_scheduler.c
         benchmarks/benchmark_timer_windows.c

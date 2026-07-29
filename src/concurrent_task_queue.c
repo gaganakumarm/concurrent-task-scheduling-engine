@@ -1,5 +1,6 @@
 #include "concurrent_scheduler/concurrent_task_queue.h"
 
+#include "internal/scheduler_observability.h"
 #include "platform/sync.h"
 
 #include <stdint.h>
@@ -23,6 +24,7 @@ typedef struct {
     bool shutdown_requested;
     size_t waiting_consumers;
     size_t waiting_producers;
+    size_t high_water_mark;
 #if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
     SchedulerProfilingSnapshot profiling;
 #endif
@@ -337,6 +339,11 @@ ConcurrentTaskQueueResult concurrent_task_queue_try_enqueue(
         case TASK_QUEUE_OK:
             result = CONCURRENT_TASK_QUEUE_OK;
             inserted = true;
+            if (task_queue_size(&queue->queue)
+                > implementation->high_water_mark) {
+                implementation->high_water_mark =
+                    task_queue_size(&queue->queue);
+            }
             break;
         case TASK_QUEUE_ERROR_INVALID_ARGUMENT:
             result = CONCURRENT_TASK_QUEUE_ERROR_INVALID_ARGUMENT;
@@ -484,6 +491,11 @@ ConcurrentTaskQueueResult concurrent_task_queue_enqueue(
         case TASK_QUEUE_OK:
             result = CONCURRENT_TASK_QUEUE_OK;
             inserted = true;
+            if (task_queue_size(&queue->queue)
+                > implementation->high_water_mark) {
+                implementation->high_water_mark =
+                    task_queue_size(&queue->queue);
+            }
 #if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
             if (waited) {
                 profiling_increment(
@@ -953,6 +965,31 @@ size_t concurrent_task_queue_capacity(ConcurrentTaskQueue *queue)
     result = task_queue_capacity(&queue->queue);
     (void)sched_mutex_unlock(&implementation->mutex);
     return result;
+}
+
+bool concurrent_task_queue_capture_runtime_snapshot(
+    ConcurrentTaskQueue *queue,
+    ConcurrentTaskQueueRuntimeSnapshot *snapshot
+)
+{
+    ConcurrentTaskQueueImplementation *implementation;
+    ConcurrentTaskQueueRuntimeSnapshot temporary;
+
+    if (queue == NULL || queue->implementation == NULL || snapshot == NULL) {
+        return false;
+    }
+    implementation = queue->implementation;
+    if (sched_mutex_lock(&implementation->mutex) != SCHED_SYNC_OK) {
+        return false;
+    }
+    temporary.capacity = task_queue_capacity(&queue->queue);
+    temporary.current_size = task_queue_size(&queue->queue);
+    temporary.high_water_mark = implementation->high_water_mark;
+    if (sched_mutex_unlock(&implementation->mutex) != SCHED_SYNC_OK) {
+        return false;
+    }
+    *snapshot = temporary;
+    return true;
 }
 
 #if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)

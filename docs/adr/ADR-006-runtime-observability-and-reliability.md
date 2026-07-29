@@ -48,6 +48,12 @@ skew. On-demand reads can briefly block one domain. Internal schema evolution
 remains possible. Reliability tests gain deterministic, structured failure
 evidence without exposing native resources.
 
+Implementation clarification from Checkpoint 6.2: lifecycle and structural
+worker fields use existing mutexes. Hot callback outcomes use cache-line-aligned
+per-worker C17 atomic slots with one writer and snapshot readers. The build
+requires lock-free 64-bit atomics and verifies this at compile time. This avoids
+both a new lock order and shared callback-accounting cache lines.
+
 ## Compatibility
 
 No public header, callback signature, Task representation, lifecycle rule,

@@ -107,8 +107,9 @@ rejected after violating a medium-workload safeguard, preserving validated
 default behavior.
 
 Phase 6 reliability and observability architecture is in progress. Runtime
-snapshots, fault injection, recovery, and watchdog behavior are not yet
-implemented.
+accounting and a test-only private hybrid snapshot are implemented; no public
+monitoring API exists. Fault injection, recovery, and watchdog behavior remain
+unimplemented.
 
 ## Planned Architecture
 
