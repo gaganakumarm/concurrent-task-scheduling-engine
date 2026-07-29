@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(
     concurrent-task-scheduling-engine
-    VERSION 0.1.0
+    VERSION 1.0.0
     DESCRIPTION "Concurrent Task Scheduling Engine in C"
     LANGUAGES C
 )
@@ -12,6 +12,8 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 include(CTest)
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
 
 option(
     CONCURRENT_SCHEDULER_ENABLE_PROFILING
@@ -70,7 +72,16 @@ endif()
 target_include_directories(
     concurrent_scheduler_core
     PUBLIC
-        "${PROJECT_SOURCE_DIR}/include"
+        "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+        "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+)
+
+set_target_properties(
+    concurrent_scheduler_core
+    PROPERTIES
+        EXPORT_NAME concurrent_scheduler
+        OUTPUT_NAME concurrent_scheduler
+        VERSION "${PROJECT_VERSION}"
 )
 
 target_compile_definitions(
@@ -387,3 +398,47 @@ else()
         "No synchronization backend is available for this platform."
     )
 endif()
+
+install(
+    TARGETS
+        concurrent_scheduler_core
+        concurrent_scheduler_platform_sync
+    EXPORT ConcurrentSchedulerTargets
+    ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}"
+)
+
+install(
+    DIRECTORY include/concurrent_scheduler
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+)
+
+install(
+    FILES LICENSE
+    DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/${PROJECT_NAME}"
+)
+
+configure_package_config_file(
+    cmake/ConcurrentSchedulerConfig.cmake.in
+    "${CMAKE_CURRENT_BINARY_DIR}/ConcurrentSchedulerConfig.cmake"
+    INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ConcurrentScheduler"
+)
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/ConcurrentSchedulerConfigVersion.cmake"
+    VERSION "${PROJECT_VERSION}"
+    COMPATIBILITY SameMajorVersion
+)
+
+install(
+    EXPORT ConcurrentSchedulerTargets
+    FILE ConcurrentSchedulerTargets.cmake
+    NAMESPACE ConcurrentScheduler::
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ConcurrentScheduler"
+)
+
+install(
+    FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/ConcurrentSchedulerConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/ConcurrentSchedulerConfigVersion.cmake"
+    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ConcurrentScheduler"
+)
