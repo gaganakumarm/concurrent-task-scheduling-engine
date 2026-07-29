@@ -129,11 +129,102 @@ static int test_worker_creation_failure(uint64_t occurrence)
         || health != SCHEDULER_HEALTH_FAILED) {
         goto cleanup;
     }
+    if (scheduler_join(&scheduler) != SCHEDULER_OK
+        || !scheduler_capture_snapshot(&scheduler, &snapshot)
+        || snapshot.state != SCHEDULER_SNAPSHOT_STATE_STOPPED
+        || snapshot.created_worker_count != expected_created
+        || snapshot.joined_worker_count != expected_created
+        || snapshot.active_worker_count != 0U
+        || !scheduler_snapshot_validate(
+            &snapshot, SCHEDULER_VALIDATION_QUIESCENT, &validation)
+        || validation.violation_count != 0U
+        || validation.validation_incomplete
+        || !scheduler_snapshot_derive_health(
+            &snapshot, &validation, &health)
+        || health != SCHEDULER_HEALTH_STOPPED
+        || scheduler_join(&scheduler) != SCHEDULER_OK) {
+        goto cleanup;
+    }
     result = EXIT_SUCCESS;
 
 cleanup:
     if (scheduler_destroy(&scheduler) != SCHEDULER_OK) {
         result = EXIT_FAILURE;
+    }
+    return result;
+}
+
+static int test_failure_recovery_lifecycle(void)
+{
+    Scheduler scheduler = {0};
+    SchedulerSnapshot snapshot = {0};
+    SchedulerValidationResult validation = {0};
+    SchedulerHealth health;
+    int initialized = 0;
+    int result = EXIT_FAILURE;
+
+    if (scheduler_init(&scheduler, 2U, 2U, no_op_callback, NULL)
+        != SCHEDULER_OK) {
+        return EXIT_FAILURE;
+    }
+    initialized = 1;
+    if (scheduler_init(&scheduler, 2U, 2U, no_op_callback, NULL)
+            != SCHEDULER_ERROR_INVALID_STATE
+        || scheduler_shutdown(&scheduler) != SCHEDULER_ERROR_INVALID_STATE
+        || scheduler_join(&scheduler) != SCHEDULER_ERROR_INVALID_STATE
+        || !scheduler_fault_configure(
+            &scheduler, SCHEDULER_FAULT_ALLOCATION, UINT64_C(2))
+        || scheduler_start(&scheduler) != SCHEDULER_ERROR_ALLOCATION
+        || !scheduler_capture_snapshot(&scheduler, &snapshot)
+        || snapshot.state != SCHEDULER_SNAPSHOT_STATE_INITIALIZED
+        || snapshot.created_worker_count != 0U
+        || snapshot.active_worker_count != 0U
+        || !scheduler_snapshot_validate(
+            &snapshot, SCHEDULER_VALIDATION_QUIESCENT, &validation)
+        || validation.violation_count != 0U
+        || validation.validation_incomplete
+        || !scheduler_snapshot_derive_health(
+            &snapshot, &validation, &health)
+        || health != SCHEDULER_HEALTH_HEALTHY
+        || !scheduler_fault_reset(&scheduler)
+        || scheduler_start(&scheduler) != SCHEDULER_OK
+        || scheduler_start(&scheduler) != SCHEDULER_ERROR_INVALID_STATE
+        || scheduler_destroy(&scheduler) != SCHEDULER_ERROR_INVALID_STATE
+        || scheduler_shutdown(&scheduler) != SCHEDULER_OK
+        || scheduler_shutdown(&scheduler) != SCHEDULER_OK
+        || scheduler_join(&scheduler) != SCHEDULER_OK
+        || scheduler_join(&scheduler) != SCHEDULER_OK
+        || !scheduler_capture_snapshot(&scheduler, &snapshot)
+        || snapshot.state != SCHEDULER_SNAPSHOT_STATE_STOPPED
+        || snapshot.active_worker_count != 0U
+        || snapshot.joined_worker_count != snapshot.created_worker_count
+        || !scheduler_snapshot_validate(
+            &snapshot, SCHEDULER_VALIDATION_QUIESCENT, &validation)
+        || validation.violation_count != 0U
+        || !scheduler_snapshot_derive_health(
+            &snapshot, &validation, &health)
+        || health != SCHEDULER_HEALTH_STOPPED
+        || scheduler_destroy(&scheduler) != SCHEDULER_OK
+        || scheduler_destroy(&scheduler) != SCHEDULER_OK
+        || scheduler_join(&scheduler) != SCHEDULER_ERROR_INVALID_STATE) {
+        goto cleanup;
+    }
+    initialized = 0;
+    if (scheduler_init(&scheduler, 1U, 1U, no_op_callback, NULL)
+            != SCHEDULER_OK
+        || scheduler_destroy(&scheduler) != SCHEDULER_OK
+        || scheduler_destroy(&scheduler) != SCHEDULER_OK) {
+        goto cleanup;
+    }
+    result = EXIT_SUCCESS;
+
+cleanup:
+    if (initialized) {
+        (void)scheduler_shutdown(&scheduler);
+        (void)scheduler_join(&scheduler);
+        (void)scheduler_destroy(&scheduler);
+    } else {
+        (void)scheduler_destroy(&scheduler);
     }
     return result;
 }
@@ -224,10 +315,11 @@ int main(void)
         || test_worker_creation_failure(UINT64_C(3)) != EXIT_SUCCESS
         || test_allocation_failure(UINT64_C(1)) != EXIT_SUCCESS
         || test_allocation_failure(UINT64_C(2)) != EXIT_SUCCESS
-        || test_safe_join_failure() != EXIT_SUCCESS) {
+        || test_safe_join_failure() != EXIT_SUCCESS
+        || test_failure_recovery_lifecycle() != EXIT_SUCCESS) {
         fputs("Scheduler fault-injection tests failed.\n", stderr);
         return EXIT_FAILURE;
     }
-    puts("FAULT-INJECTION-001 through FAULT-INJECTION-030 passed.");
+    puts("FAULT-INJECTION-001 through FAULT-INJECTION-050 passed.");
     return EXIT_SUCCESS;
 }

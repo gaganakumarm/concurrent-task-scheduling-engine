@@ -116,6 +116,9 @@ not enforce or alter runtime behavior.
 A deterministic private fault-injection framework is available only through a
 testing-only compile-time option that is disabled by default. It does not
 provide public fault controls or complete failure coverage.
+Phase 6 reliability completion additionally validates deterministic
+partial-start cleanup, allocation-failure recovery, lifecycle misuse, repeated
+cleanup, and post-failure observability without changing production behavior.
 
 ## Planned Architecture
 

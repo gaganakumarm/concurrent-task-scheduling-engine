@@ -408,3 +408,9 @@ enabled. Initial seams cover worker-array allocation, worker creation, and
 post-native-join result rejection. Disabled builds contain no plan storage or
 fault checks, and worker-startup injection remains deferred because readiness
 arrival order is scheduling-dependent.
+
+Checkpoint 6.5 implementation note: the existing fault seams now validate
+partial-start join cleanup, allocation-failure retry, invalid lifecycle
+sequences, idempotent shutdown/join/destroy, post-destroy behavior, and wrapper
+reuse. No production code or fault point was added. Snapshot invariants,
+derived health, and deterministic diagnostics remain the cleanup oracles.
