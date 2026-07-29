@@ -24,8 +24,7 @@ Phase 4 — Fixed Worker Pool and Scheduler Lifecycle is complete as of
 2026-07-29. The supported backend is Windows through the project’s
 platform-neutral synchronization abstraction. Validation covers the six CTest
 targets at 6/6, plus 3,000/3,000 scheduler, 2,000/2,000 synchronized-queue,
-and 1,000/1,000 backend lifecycle runs. Phase 5 will address benchmarking and
-performance analysis; it has not started.
+and 1,000/1,000 backend lifecycle runs.
 
 The C17 core library foundation is available with a minimal project version
 API and runnable initialization executable. Public task state and priority
@@ -74,6 +73,38 @@ conditions to release blocked producers and consumers, and preserves queued
 Tasks for FIFO draining. Dequeue and peek return `SHUTDOWN` only when shutdown
 is active and queue storage is empty. Storage queries retain their normal
 meaning, and Task ownership remains with the caller.
+
+## Phase 5 — Performance Engineering
+
+Phase 5 added a reproducible Release benchmark, Windows high-resolution timing,
+exact callback validation, compile-time-gated contention profiling, and a
+controlled A/B optimization process. Minimal-work throughput scaled weakly or
+negatively with additional workers around the shared bounded queue. Direct
+profiling supported queue coordination as a material bottleneck for tiny Tasks,
+while partitioned exact accounting did not explain the scaling result.
+
+A waiter-aware transition-signaling experiment reduced condition signals
+substantially in several configurations, but its medium-CPU median regressed
+5.79%, exceeding the acceptance safeguard. The experiment was rejected:
+profiling and transition-aware signaling both default to `OFF`, and no
+experimental optimization is active in the production configuration.
+
+Phase 5 reports:
+
+- [Benchmark plan and architecture](docs/phase-5-benchmark-plan.md)
+- [Baseline benchmark report](docs/phase-5-baseline-benchmark-report.md)
+- [Contention profiling report](docs/phase-5-contention-profiling-report.md)
+- [Queue-coordination experiment](docs/phase-5-queue-coordination-optimization-report.md)
+- [Performance engineering closure](docs/phase-5-performance-engineering-closure.md)
+- [Phase 5 artifact index](docs/phase-5-performance-index.md)
+
+Portfolio summary: Built and profiled a bounded concurrent task scheduler in
+C with a fixed worker pool, deterministic correctness validation,
+high-resolution Windows timing, queue-contention instrumentation, and
+controlled A/B acceptance gates. Profiling identified shared queue coordination
+as a material tiny-Task bottleneck. A signal-reduction candidate was honestly
+rejected after violating a medium-workload safeguard, preserving validated
+default behavior.
 
 ## Planned Architecture
 
