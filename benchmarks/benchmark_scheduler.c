@@ -1,6 +1,7 @@
 #include "benchmark_timer.h"
 
 #include "concurrent_scheduler/scheduler.h"
+#include "internal/scheduler_observability.h"
 #include "platform/sync.h"
 #if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
 #include "internal/scheduler_profiling.h"
@@ -26,6 +27,7 @@ enum {
     DEFAULT_ITERATIONS = 10,
     LIGHT_CPU_OPERATIONS = 128,
     MEDIUM_CPU_OPERATIONS = 4096,
+    HEAVY_CPU_OPERATIONS = 65536,
     CSV_BUFFER_SIZE = 2048,
     UTC_BUFFER_SIZE = 32
 };
@@ -34,6 +36,7 @@ typedef enum {
     PROFILE_NOOP,
     PROFILE_LIGHT_CPU,
     PROFILE_MEDIUM_CPU,
+    PROFILE_HEAVY_CPU,
     PROFILE_CONTROLLED_BLOCKING
 } CallbackProfile;
 
@@ -83,6 +86,9 @@ typedef struct {
     size_t executed;
     size_t rejected;
     bool correctness_passed;
+    SchedulerSnapshot runtime_snapshot;
+    SchedulerValidationResult validation;
+    SchedulerHealth health;
 #if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
     SchedulerProfilingSnapshot profiling;
     uint64_t callback_compute_total_ns;
@@ -189,7 +195,13 @@ static const char *const CSV_HEADER =
     "callback_combined_total_ns,worker_task_cv,zero_task_workers,"
     "accounting_mode,"
 #endif
-    "correctness_passed";
+    "correctness_passed,snapshot_version,snapshot_consistency,"
+    "snapshot_overflow,submitted_count,accepted_count,rejected_count,"
+    "dequeued_count,callback_started_count,callback_succeeded_count,"
+    "callback_failed_count,current_running_count,created_worker_count,"
+    "active_worker_count,joined_worker_count,queue_current_size,"
+    "queue_high_water_mark,validation_violations,validation_incomplete,"
+    "derived_health";
 
 static const char *profile_name(CallbackProfile profile)
 {
@@ -200,6 +212,8 @@ static const char *profile_name(CallbackProfile profile)
         return "light_cpu";
     case PROFILE_MEDIUM_CPU:
         return "medium_cpu";
+    case PROFILE_HEAVY_CPU:
+        return "heavy_cpu";
     case PROFILE_CONTROLLED_BLOCKING:
         return "controlled_blocking";
     default:
@@ -255,6 +269,8 @@ static bool parse_profile(const char *text, CallbackProfile *profile)
         *profile = PROFILE_LIGHT_CPU;
     } else if (strcmp(text, "medium_cpu") == 0) {
         *profile = PROFILE_MEDIUM_CPU;
+    } else if (strcmp(text, "heavy_cpu") == 0) {
+        *profile = PROFILE_HEAVY_CPU;
     } else if (strcmp(text, "controlled_blocking") == 0) {
         *profile = PROFILE_CONTROLLED_BLOCKING;
     } else {
@@ -346,7 +362,8 @@ static void print_help(void)
         "  --scenario throughput|s1|s2|s3|s4|s5|s6|s7|s8\n"
         "  --workers N --producers N --capacity N --tasks N\n"
         "  --warmup N --iterations N\n"
-        "  --callback-profile noop|light_cpu|medium_cpu|controlled_blocking\n"
+        "  --callback-profile "
+        "noop|light_cpu|medium_cpu|heavy_cpu|controlled_blocking\n"
         "  --mode validated|low-overhead\n"
 #if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
         "  --accounting standard|partitioned\n"
@@ -595,6 +612,11 @@ static int benchmark_callback(Task *task, void *argument)
         contribution = deterministic_work(
             contribution,
             MEDIUM_CPU_OPERATIONS
+        );
+    } else if (context->profile == PROFILE_HEAVY_CPU) {
+        contribution = deterministic_work(
+            contribution,
+            HEAVY_CPU_OPERATIONS
         );
     }
 #if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
@@ -936,6 +958,11 @@ static bool validate_execution(
                 contribution,
                 MEDIUM_CPU_OPERATIONS
             );
+        } else if (config->profile == PROFILE_HEAVY_CPU) {
+            contribution = deterministic_work(
+                contribution,
+                HEAVY_CPU_OPERATIONS
+            );
         }
         expected_checksum ^= contribution;
     }
@@ -1123,6 +1150,35 @@ static bool run_iteration(
     }
     scheduler_started = false;
     execution_count_after_join = callback.execution_count;
+    if (!scheduler_capture_snapshot(&scheduler, &result->runtime_snapshot)
+        || result->runtime_snapshot.overflow_detected
+        || result->runtime_snapshot.submitted_count != config->tasks
+        || result->runtime_snapshot.accepted_count != config->tasks
+        || result->runtime_snapshot.rejected_count != UINT64_C(0)
+        || result->runtime_snapshot.dequeued_count != config->tasks
+        || result->runtime_snapshot.callback_started_count != config->tasks
+        || result->runtime_snapshot.callback_succeeded_count != config->tasks
+        || result->runtime_snapshot.callback_failed_count != UINT64_C(0)
+        || result->runtime_snapshot.currently_running_count != UINT64_C(0)
+        || result->runtime_snapshot.active_worker_count != 0U
+        || result->runtime_snapshot.joined_worker_count
+            != result->runtime_snapshot.created_worker_count
+        || result->runtime_snapshot.queue_current_size != 0U
+        || !scheduler_snapshot_validate(
+            &result->runtime_snapshot,
+            SCHEDULER_VALIDATION_QUIESCENT,
+            &result->validation
+        )
+        || result->validation.violation_count != 0U
+        || result->validation.validation_incomplete
+        || !scheduler_snapshot_derive_health(
+            &result->runtime_snapshot,
+            &result->validation,
+            &result->health
+        )
+        || result->health != SCHEDULER_HEALTH_STOPPED) {
+        goto cleanup;
+    }
 #if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
     if (!scheduler_profiling_snapshot(&scheduler, &result->profiling)
         || result->profiling.timing_failed
@@ -1450,7 +1506,31 @@ static bool write_csv_row(
     }
 #undef PROFILE_TICKS_TO_NS
 #endif
-    return fprintf(file, "true\n") >= 0;
+    return fprintf(
+        file,
+        "true,%" PRIu32 ",%u,%u,%" PRIu64 ",%" PRIu64 ","
+        "%" PRIu64 ",%" PRIu64 ",%" PRIu64 ",%" PRIu64 ","
+        "%" PRIu64 ",%" PRIu64 ",%zu,%zu,%zu,%zu,%zu,%zu,%u,%s\n",
+        result->runtime_snapshot.version,
+        (unsigned)result->runtime_snapshot.consistency,
+        result->runtime_snapshot.overflow_detected ? 1U : 0U,
+        result->runtime_snapshot.submitted_count,
+        result->runtime_snapshot.accepted_count,
+        result->runtime_snapshot.rejected_count,
+        result->runtime_snapshot.dequeued_count,
+        result->runtime_snapshot.callback_started_count,
+        result->runtime_snapshot.callback_succeeded_count,
+        result->runtime_snapshot.callback_failed_count,
+        result->runtime_snapshot.currently_running_count,
+        result->runtime_snapshot.created_worker_count,
+        result->runtime_snapshot.active_worker_count,
+        result->runtime_snapshot.joined_worker_count,
+        result->runtime_snapshot.queue_current_size,
+        result->runtime_snapshot.queue_high_water_mark,
+        result->validation.violation_count,
+        result->validation.validation_incomplete ? 1U : 0U,
+        scheduler_health_name(result->health)
+    ) >= 0;
 }
 
 static void print_configuration(const BenchmarkConfig *config)

@@ -120,6 +120,22 @@ Phase 6 reliability completion additionally validates deterministic
 partial-start cleanup, allocation-failure recovery, lifecycle misuse, repeated
 cleanup, and post-failure observability without changing production behavior.
 
+## Phase 7 — Performance and Scalability Validation
+
+Phase 7.1 measured the unchanged scheduler on a documented 4-core/8-thread
+Windows system. Under four producers and capacity 64, median no-op throughput
+peaked at four workers (1.26 million tasks/s for 100,000 tasks), while medium
+and heavy deterministic CPU workloads continued scaling through eight logical
+workers. Exact runtime accounting and quiescent lifecycle validation passed
+through 9.9 million sustained callbacks and 2,100 repeated lifecycle cycles.
+These are configuration-specific measurements, not cross-machine guarantees.
+The shared bounded queue remains the measured tiny-task bottleneck; no
+production optimization or public API change was introduced.
+
+See the
+[Phase 7.1 performance, scalability, and stability report](docs/phase-7-performance-scalability-validation.md)
+for complete controls, variability, limitations, and reproduction steps.
+
 ## Planned Architecture
 
 ```text
