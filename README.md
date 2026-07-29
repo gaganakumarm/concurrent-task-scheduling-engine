@@ -136,6 +136,14 @@ See the
 [Phase 7.1 performance, scalability, and stability report](docs/phase-7-performance-scalability-validation.md)
 for complete controls, variability, limitations, and reproduction steps.
 
+Phase 7.2 completed a warning, static-analysis, ownership, arithmetic,
+lifecycle, synchronization, and failure-path audit without changing production
+code or the public API. GCC `-fanalyzer` reported no findings, and normal,
+fault-enabled, profiling, and combined-feature tests passed. The local MinGW
+toolchain lacked ASan, UBSan, and TSan runtime libraries, so no sanitizer or
+universal race-freedom claim is made. See the
+[Phase 7.2 robustness and static-analysis report](docs/phase-7-robustness-static-analysis.md).
+
 ## Planned Architecture
 
 ```text
