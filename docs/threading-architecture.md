@@ -49,8 +49,8 @@ The internal condition abstraction provides distinct signal and broadcast
 operations. The Windows backend implements them with
 `WakeConditionVariable` and `WakeAllConditionVariable`, respectively.
 Deterministic backend tests verify that one broadcast releases every waiter in
-a fixed set using a shared mutex-protected predicate. Verification step 4.3 now uses
-that operation to broadcast both queue conditions during shutdown.
+a fixed set using a shared mutex-protected predicate. Queue shutdown uses that
+operation to broadcast both queue conditions.
 
 ## Synchronized Wrapper Foundation
 
@@ -322,6 +322,6 @@ UCRT GCC 16.1.0 toolchain.
 
 ## Deferred Functionality
 
-This verification step does not implement blocking peek, timeout lifecycle APIs,
+The current design does not implement blocking peek, timeout lifecycle APIs,
 cancellation, restart, or completion-result APIs. `TaskQueue` remains
 non-thread-safe.

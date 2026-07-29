@@ -2,107 +2,169 @@
 
 ## Overview
 
-Verification step 6.5 completes the planned Reliability and Observability validation layer by exercising
-remaining deterministic lifecycle and cleanup paths. It changes no scheduler,
-queue, worker, public API, fault model, or production execution behavior.
+The reliability layer combines lifetime-scoped runtime accounting,
+domain-consistent snapshots, lifecycle-invariant validation, derived health,
+and compile-time-gated deterministic fault injection. It changes no public
+header, callback signature, Task representation, ownership rule, or ordinary
+scheduler behavior.
 
-## Remaining validated failures
+## Runtime snapshots
 
-The fault-enabled suite now validates:
+The private `SchedulerSnapshot` captures:
 
-- worker-creation failure followed by explicit join cleanup;
-- worker-array allocation failure at either allocation;
-- retrying start after allocation failure and fault-plan reset;
-- duplicate initialization rejection;
-- shutdown and join before start;
-- double start rejection;
-- destroy while running rejection;
-- idempotent shutdown, join, and destroy;
-- join after destroy;
-- wrapper reuse after a completed or failed lifetime;
-- safe cleanup after injected join-result rejection.
+- schema and consistency identifiers;
+- lifecycle state, shutdown state, and active submitters;
+- configured, created, ready, active, and joined workers;
+- submitted, accepted, rejected, and dequeued Tasks;
+- callback starts, successes, failures, and currently running callbacks;
+- queue size, capacity, and high-water mark;
+- startup, join, and worker-runtime failures; and
+- sticky overflow state.
 
-These tests supplement the existing scheduler lifecycle matrix rather than
-replacing it.
+Capture copies lifecycle, worker, and queue domains separately, releasing each
+mutex before acquiring the next. Each domain is exact at its copy point, while
+the combined snapshot spans an observation window. Live cross-domain
+relationships are therefore advisory; exact balances are checked only after
+the scheduler is quiescent.
 
-## Cleanup guarantees
+Hot callback outcomes use cache-line-separated per-worker C17 atomic slots with
+one writer and snapshot readers. Other values reuse existing synchronization.
+Unsigned counters saturate at `UINT64_MAX`, permanently record overflow, and
+never wrap. Capture allocates no memory and emits no output.
+
+## Lifecycle invariant validation
+
+Validation is a private, pure operation over caller-supplied snapshots. Live
+mode checks bounds that remain valid across a hybrid capture window, including:
+
+- queue size and high-water mark do not exceed capacity;
+- created, ready, active, and joined workers remain within configured bounds;
+- active and joined worker states are compatible;
+- callback outcomes do not exceed starts;
+- dequeues and callback starts do not exceed accepted work; and
+- lifecycle, submission gate, and shutdown fields are compatible.
+
+Quiescent mode additionally requires, when counters have not overflowed:
+
+```text
+submitted = accepted + rejected
+accepted  = dequeued
+dequeued  = callback starts
+starts    = callback successes + callback failures
+```
+
+Queue size, running callbacks, and active workers must be zero, and a stopped
+scheduler must have joined every created worker. Overflow marks accounting
+incomplete rather than claiming corruption.
+
+Validation records stable issue codes with informational, advisory, violation,
+or incomplete severity. Derived health is:
+
+- `FAILED` for failed lifecycle or structural violation;
+- `STOPPING` while shutdown is in progress;
+- `STOPPED` for a valid joined scheduler;
+- `DEGRADED` for advisory failures or incomplete accounting; and
+- `HEALTHY` for valid initialized or running state.
+
+Diagnostic formatting writes deterministic names and values into caller
+storage, reports the required size, safely truncates, and emits no addresses,
+timestamps, allocation, logging, or external data.
+
+## Deterministic fault injection
+
+`CONCURRENT_SCHEDULER_ENABLE_FAULT_INJECTION` defaults to `OFF`. Enabled builds
+compile a private per-scheduler fault plan and add one dedicated test
+executable. Disabled builds contain no fault-plan field, branch, atomic
+operation, lock, or function call.
+
+Plans use one-based occurrence numbers. Only a matching fault point advances
+its counter, the selected occurrence fires once, and resetting or replacing a
+plan clears its observation state. C17 atomics make plan observation data-race
+safe, while configuration remains an externally serialized lifecycle action.
+There is no process-global mutable plan.
+
+Implemented seams are:
+
+| Fault point | Injection location | Result |
+|---|---|---|
+| Allocation | Either worker-array allocation during start | Behaves as allocation failure |
+| Worker creation | Immediately before a native thread-create call | Uses normal partial-start cleanup |
+| Worker join | After native join, before result acceptance | Rejects the result after handle ownership is resolved |
+
+Worker-readiness injection is deliberately deferred because readiness order is
+scheduler-dependent. Queue corruption, callback corruption, arbitrary backend
+failure, random faults, thread termination, and runtime activation are not
+supported.
+
+## Cleanup and recovery guarantees
 
 Partial worker creation closes the queue and joins every created worker before
-returning. A subsequent join is safe and moves the cleaned failed scheduler to
+returning. A later join is safe and moves the cleaned failed scheduler to
 stopped state. Worker-array allocation failure frees a successful partial
-allocation, retains initialized state, and permits either destroy or a
-deterministic retry. Native join ownership is resolved before injected result
-rejection. Every tested path finishes with zero active workers and a
-destroyable wrapper.
+allocation, restores initialized state, and permits deterministic retry after
+the fault plan is reset. Injected join-result rejection still destroys native
+handles and frees worker arrays.
 
-Repeated cleanup follows the public contract: shutdown and join are idempotent
-after successful completion, and destroy is idempotent after the wrapper is
-cleared. No cleanup operation restarts workers or reopens submissions.
-
-## Lifecycle validation
-
-Invalid calls return existing status codes without mutation. In particular,
+Lifecycle misuse returns existing error codes without mutating valid state:
 start cannot run twice, shutdown and join reject initialized state, destroy
-rejects running state, and join rejects a destroyed wrapper. A reset
-allocation plan permits a second start attempt only because the first
-allocation failure restores the approved initialized state.
+rejects running state, and join rejects a destroyed wrapper. Shutdown and join
+are idempotent after successful completion, destroy is idempotent after the
+wrapper is cleared, and wrappers can be reused after a completed or safely
+failed lifetime.
 
-## Observability and health
+Every validated failure path leaves zero active workers and a destroyable
+wrapper. Cleanup never restarts workers or reopens submission.
 
-After creation failure, the failed snapshot has exact created/joined counts,
-zero active workers, one startup failure, and valid quiescent accounting.
-Health is `FAILED` until explicit join cleanup completes; the resulting
-structurally valid stopped snapshot derives `STOPPED`.
+## Observability after failure
 
-Allocation failure leaves an initialized, structurally valid, healthy
-snapshot with no workers. Successful retry and cleanup produce a valid stopped
-snapshot with joined equal to created. Join-result rejection continues to
-produce the deterministic `STOPPED_WORKERS_NOT_JOINED` diagnostic and failed
-health while retaining no live native thread.
+Worker-creation failure produces exact created/joined counts, zero active
+workers, one startup failure, and valid quiescent accounting. Health remains
+failed until explicit join cleanup completes, after which the structurally
+valid stopped snapshot derives stopped health.
 
-## Fault-framework extensions
+Allocation failure leaves an initialized, healthy snapshot with no workers.
+Successful retry and cleanup yield joined equal to created. Join-result
+rejection retains no live native thread but reports the deterministic
+stopped-workers-not-joined issue and failed health.
 
-None. Existing allocation, worker-creation, and post-native-join seams are
-sufficient for this verification step. Avoiding new seams preserves deterministic
-behavior and keeps production builds unchanged.
+## Test coverage
 
-## Unsupported scenarios
+The normal build registers seven CTests. A fault-enabled build registers an
+eighth test containing 50 deterministic checks. Coverage includes:
 
-Worker readiness injection remains deferred because readiness arrival order is
-scheduler-dependent. Pre-instance scheduler allocation, queue initialization,
-and synchronization primitive injection would require an early global or
-backend-level seam. Random faults, retries, recovery, thread restart,
-watchdogs, callback timeout, cancellation, and resource corruption remain out
-of scope.
+- first, middle, and last worker-creation failure;
+- either worker-array allocation failure and retry;
+- duplicate initialization and double start;
+- shutdown and join before start;
+- destroy while running and join after destroy;
+- repeated shutdown, join, and destroy;
+- wrapper reuse after successful and failed lifetimes;
+- safe post-native-join result rejection;
+- snapshot saturation, overflow, validation, formatting, and health; and
+- partial-cleanup accounting.
 
-## Testing
-
-The production build retains seven CTests. Fault-enabled builds retain eight,
-with the dedicated fault suite expanded from 30 to 50 checks. All new cases use
-small bounded worker sets and existing lifecycle synchronization; no arbitrary
-sleep or timing oracle is used.
+Tests use small bounded worker sets and explicit mutex/condition coordination,
+not arbitrary sleeps or timing oracles. Normal, profiling, fault-enabled, and
+combined builds passed their applicable suites without compiler warnings.
 
 ## Production compatibility
 
-Fault injection remains default OFF and compiled out of normal, benchmark, and
-profiling builds. This verification step changes only fault-enabled tests and
-documentation, so it adds no production data, branch, lock, atomic operation,
-allocation, or runtime call.
-
-## Future extension points
-
-A future change may design backend-owned deterministic initialization seams or a
-stable readiness ordinal, but only with explicit ownership, cleanup, and
-compile-out contracts. Scalability and Stability should begin with a separate architecture
-decision rather than extending Reliability and Observability implicitly.
+Snapshots and validators are private and on demand. Fault injection is not
+installed or reachable through the public API, command line, environment, or
+runtime input. Normal scheduler operations retain their public behavior and
+fault injection remains compiled out.
 
 ## Known limitations
 
-The tests prove deterministic control-flow cleanup and accounting but do not
-replace external handle, heap, or sanitizer leak tooling. Platform failure
-paths that cannot be selected deterministically remain unverified.
+Hybrid live snapshots cannot prove cross-domain equality. Counters summarize
+outcomes rather than identifying individual Tasks or preserving callback
+status codes. The health model has no timeout signal. Tests establish
+deterministic control-flow cleanup but do not replace heap, handle, sanitizer,
+or long-duration leak tooling. Unsupported platform failure paths remain
+unverified.
 
-## Decision
+## Conclusion
 
-Final approval depends on successful production, fault, benchmark, profiling,
-documentation, and repository-hygiene validation.
+The scheduler has deterministic evidence for lifecycle accounting, structural
+and quiescent invariants, partial-start cleanup, allocation recovery, native
+join ownership, repeated cleanup, and production-disabled diagnostic features.

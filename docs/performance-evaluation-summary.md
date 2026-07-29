@@ -24,13 +24,14 @@ The work covers the Windows fixed-worker scheduler and shared bounded queue.
 It does not claim cross-platform performance, statistical significance,
 universal scalability, or completion of any alternative queue design.
 
-## 4. Delivery timeline
+## 4. Evidence progression
 
-- 5.1 (`5b2a3cc`): benchmark architecture and deterministic harness.
-- 5.2 (`acbe548`): ordinary Release baseline measurements.
-- 5.3 (`7e7e962`): direct contention profiling and accounting comparison.
-- 5.4 (`d847fef`): controlled transition-signaling experiment and rollback.
-- 5.5: evidence audit, production verification, index, and summary.
+The evaluation established a deterministic benchmark harness, captured an
+ordinary Release baseline, added separately gated contention profiling,
+compared scheduler contention with benchmark-accounting contention, and ran a
+controlled signaling experiment with an explicit rollback gate. Raw CSVs,
+environment records, analysis tools, and SVG charts retain the evidence behind
+this summary.
 
 ## 5. Benchmark architecture
 
@@ -46,6 +47,20 @@ weak or negative, extra producers raised submission cost, and capacity one
 caused substantial throughput loss. Medium CPU shifted cost toward callback
 computation. Shutdown and join were minor in tested runs. Variation limited
 fine-grained claims.
+
+The later scalability matrix used four producers, capacity 64, and 15 samples
+per value. Median no-op throughput was approximately 449,000, 1.21 million,
+1.26 million, 1.01 million, and 855,000 Tasks/s at 1, 2, 4, 8, and 16 workers.
+No-op work therefore saturated around two to four workers. Medium work scaled
+from about 57,000 Tasks/s at one worker to 398,000 at eight, while heavy work
+scaled from about 4,500 to 30,000. Both CPU workloads flattened at 16 workers
+as oversubscription reduced efficiency.
+
+With four workers, increasing producers from one to eight reduced no-op median
+throughput by about 17.5% and did not improve medium work. Capacity one reduced
+no-op throughput to about 452,000 Tasks/s; capacity 64 reached the useful
+plateau near 1.26 million, while 256 and 1,024 provided no consistent gain.
+Larger queues absorb bursts but consume more pointer storage.
 
 ## 7. Contention profiling results
 
@@ -75,8 +90,25 @@ wait-rate changes were mixed. Medium CPU regressed 5.79%, beyond the mandatory
 - Reduced signaling alone does not reliably reduce wait rates.
 - Partitioned correctness accounting did not materially improve scaling.
 - Profiling has measurable observer overhead.
+- No-op throughput saturates around two to four workers on the measured host.
+- CPU-heavy callbacks scale through eight logical processors before flattening.
+- Capacity 64 is near the measured useful plateau.
+- Additional producers do not improve the tested four-worker workloads.
 
-## 10. Rejected hypotheses
+## 10. Stability evidence
+
+Nine one-million-Task no-op runs and nine 100,000-Task medium runs completed
+9.9 million validated callbacks without count mismatches, overflow, hangs, or
+unexplained lifecycle failures. A separate repeated-lifecycle test completed
+2,100 initialize/start/submit/shutdown/join/destroy cycles. Every cycle ended
+with zero active workers and queue depth, balanced created/joined workers,
+exact accounting, stopped health, and successful destruction.
+
+These runs are high-volume and repeated-lifecycle evidence, not a long-duration
+soak or memory-profiler result. Detailed resident-memory sampling was not
+collected.
+
+## 11. Rejected hypotheses
 
 1. **Correctness accounting causes negative scaling — not supported.**
    Partitioned exact accounting did not materially improve no-op or light CPU.
@@ -87,42 +119,43 @@ wait-rate changes were mixed. Medium CPU regressed 5.79%, beyond the mandatory
 4. **The candidate should become the default — rejected.**
    Medium CPU violated the mandatory performance safeguard.
 
-## 11. Unresolved questions
+## 12. Unresolved questions
 
 Unresolved work includes alternative queues, batching, per-worker queues, work
 stealing, Windows scheduler influence, Linux reproduction, thread affinity,
 higher Task-count stability, alternative synchronization primitives, and
 worker-count selection by callback granularity. None is implemented here.
 
-## 12. Threats to validity
+## 13. Threats to validity
 
 Windows scheduling, background work, frequency and thermal changes, limited
 sample sizes, a single CPU, profiling overhead, and very short callbacks limit
 causal and external claims. Reported percentages use medians and are rounded to
 three decimals in prose unless greater precision is needed for a gate.
 
-## 13. Production behavior status
+## 14. Production behavior status
 
 The scheduler uses the previously validated unconditional signaling behavior.
 Profiling defaults to `OFF`; transition-aware signaling defaults to `OFF`.
 Neither experiment is public. Public APIs, FIFO semantics, bounded blocking,
-lifecycle, shutdown, ownership, Task execution, and the six-test topology are
+lifecycle, shutdown, ownership, and Task execution are
 unchanged.
 
-## 14. Correctness validation
+## 15. Correctness validation
 
 Normal, profiling, and retained-candidate builds compile warning-free. Exactly
-six CTests pass, direct test executables pass, benchmark self-tests pass, and
-the main executable reports version 0.1.0 with initialized status.
+seven normal CTests pass, direct test executables pass, benchmark self-tests
+pass, and the main executable reports version 1.0.0 with initialized status.
+Fault-enabled builds register and pass an eighth dedicated test.
 
-## 15. Reproducibility
+## 16. Reproducibility
 
 The [benchmark methodology](../benchmarks/README.md), committed environment
 records, raw CSVs, summaries, and charts preserve the evidence chain. Run
 [`scripts/reproduce_performance_evaluation.ps1`](../scripts/reproduce_performance_evaluation.ps1) for build and
 self-test validation without regenerating historical matrices.
 
-## 16. Portfolio interpretation
+## 17. Portfolio interpretation
 
 The project demonstrates a bounded concurrent queue, fixed worker pool,
 lifecycle and shutdown correctness, deterministic testing, high-resolution
@@ -138,14 +171,14 @@ identified shared queue coordination as material for tiny Tasks. A
 signal-reduction strategy was rejected after violating a medium-workload
 safeguard, preserving validated production behavior.
 
-## 17. Recommended future work
+## 18. Recommended future work
 
 Reproduce the evidence on a quieter Windows environment and Linux before
 selecting another single-variable experiment. Any future queue, batching,
 affinity, or worker-selection study needs its own correctness and rollback gate.
 
-## 18. Decision
+## 19. Conclusion
 
-**PERFORMANCE EVALUATION COMPLETE.** Benchmarking, profiling, controlled experimentation,
-rollback, documentation, evidence retention, and default-production validation
-are complete. No Reliability and Observability work begins here.
+Benchmarking, profiling, controlled experimentation, rollback, evidence
+retention, and production-behavior checks support the conclusions above. No
+unvalidated optimization is enabled in the default scheduler.

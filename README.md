@@ -50,7 +50,8 @@ continued scaling through eight logical workers. These configuration-specific
 measurements are not cross-machine guarantees. The shared bounded queue remains
 the measured tiny-task bottleneck.
 
-See the [scalability and stability report](docs/scalability-and-stability.md).
+See the
+[performance evaluation summary](docs/performance-evaluation-summary.md).
 
 ## Build requirements
 
@@ -165,10 +166,11 @@ docs/                          Architecture and validation evidence
 
 ## Documentation
 
-- [Worker-pool architecture](docs/worker-pool-architecture.md)
-- [Performance evidence index](docs/performance-evidence-index.md)
-- [Reliability and observability architecture](docs/reliability-and-observability-architecture.md)
-- [Scalability and stability](docs/scalability-and-stability.md)
+- [Architecture](docs/architecture.md)
+- [Threading architecture](docs/threading-architecture.md)
+- [Benchmark plan](docs/benchmark-plan.md)
+- [Performance evaluation](docs/performance-evaluation-summary.md)
+- [Scheduler reliability](docs/reliability-report.md)
 - [Robustness and static analysis](docs/robustness-and-static-analysis.md)
 - [v1.0.0 release notes](docs/releases/v1.0.0.md)
 

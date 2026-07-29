@@ -1,12 +1,12 @@
 # Scheduler Benchmark Plan
 
-## Goals and delivery sequence
+## Goals and evaluation sequence
 
 Performance Evaluation measures the completed scheduler without changing its semantics.
-Verification step 5.1 establishes the timer, deterministic harness, correctness gate,
-CLI, statistics, and raw CSV export. Verification step 5.2 captures a controlled
-baseline and reports machine-specific observations. Later work may form and
-test one optimization hypothesis only after the optimization gate is met.
+The benchmark foundation establishes the timer, deterministic harness,
+correctness gate, CLI, statistics, and raw CSV export. Baseline evaluation
+captures controlled machine-specific observations. An optimization hypothesis
+may be tested only after the optimization gate is met.
 
 The measurement questions are:
 
@@ -61,8 +61,9 @@ No production optimization may be introduced until:
 5. unchanged correctness tests pass; and
 6. the post-change benchmark uses the same methodology.
 
-Verification step 5.1 makes no performance claim and changes no scheduler, queue,
-callback, lifecycle, shutdown, join, ownership, or public API behavior.
+The benchmark harness itself makes no performance claim and changes no
+scheduler, queue, callback, lifecycle, shutdown, join, ownership, or public API
+behavior.
 
 ## Threats to validity
 
