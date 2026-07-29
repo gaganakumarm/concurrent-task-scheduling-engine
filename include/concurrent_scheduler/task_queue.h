@@ -19,6 +19,15 @@ typedef enum {
  * non-owning Task pointers. Callers must keep queued Task objects valid while
  * they remain in the queue. The queue owns only its internal pointer buffer;
  * destroying a queue must not free Task objects. Operations are non-blocking.
+ *
+ * A successfully initialized TaskQueue is non-copyable. Callers must not copy,
+ * assign, serialize, or move it with memcpy. Its fields are
+ * implementation-owned and must not be modified directly.
+ *
+ * No TaskQueue operation is internally synchronized. Concurrent operations on
+ * one queue require caller-provided synchronization. Initialization and
+ * destruction require exclusive access, and destruction must not race with
+ * any operation.
  */
 typedef struct {
     Task **items;

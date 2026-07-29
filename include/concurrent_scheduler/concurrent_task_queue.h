@@ -20,6 +20,17 @@ typedef enum {
  * The caller allocates the wrapper. It owns its embedded TaskQueue buffer and
  * private synchronization implementation, but queued Task objects remain
  * caller-owned. Native synchronization details are private.
+ *
+ * A successfully initialized ConcurrentTaskQueue is non-copyable. Callers
+ * must not copy, assign, serialize, or move it with memcpy, and must not
+ * modify its fields directly.
+ *
+ * After successful initialization, enqueue, dequeue, peek, query, and shutdown
+ * operations may run concurrently on one queue. Multiple producers and
+ * consumers are supported. Task FIFO order is preserved, but waiter fairness
+ * and wake order are not guaranteed. Initialization requires exclusive access.
+ * Destruction is never concurrent: every active or blocked operation must
+ * return before the caller destroys the queue.
  */
 typedef struct {
     TaskQueue queue;

@@ -20,6 +20,16 @@ typedef enum {
  * Task pointer and the optional shared context supplied to scheduler_init.
  * Zero reports task success and nonzero reports task failure. The scheduler
  * never owns either argument.
+ *
+ * Callbacks may run concurrently on different workers and must synchronize
+ * shared application state. A callback may use unrelated scheduler or queue
+ * objects according to their contracts. Lifecycle operations on the same
+ * Scheduler are outside the supported callback reentrancy contract.
+ * Non-blocking self-submission with scheduler_try_submit is permitted while
+ * the scheduler remains running, but the callback must handle QUEUE_FULL and
+ * SHUTDOWN. Blocking self-submission with scheduler_submit may deadlock when
+ * every worker is executing a callback and the bounded queue has no capacity.
+ * Do not call scheduler_join from a callback.
  */
 typedef int (*SchedulerTaskExecuteFunction)(
     Task *task,
@@ -32,6 +42,18 @@ typedef int (*SchedulerTaskExecuteFunction)(
  * The normal lifecycle is init, start, submit, shutdown, join, then destroy.
  * Restart is unsupported. After destroy resets the wrapper, init begins a new
  * independent lifetime.
+ *
+ * A successfully initialized Scheduler is non-copyable. Callers must not copy,
+ * assign, serialize, or move it with memcpy, and its address must remain stable
+ * until scheduler_destroy completes.
+ *
+ * Multiple threads may call scheduler_submit and scheduler_try_submit
+ * concurrently while the scheduler is running. Those submissions may race
+ * with one externally serialized scheduler_shutdown call: operations already
+ * registered with the submission gate finish, blocked submitters wake, and
+ * later submissions observe shutdown. init, start, shutdown, join, and destroy
+ * must not run concurrently with one another. Destroy must not race with
+ * submission, callbacks, or any other operation.
  */
 typedef struct {
     void *implementation;
@@ -72,6 +94,11 @@ SchedulerResult scheduler_start(Scheduler *scheduler);
  * on other workers. The caller owns synchronization for Task data, callback
  * behavior, and shared callback context. Neither operation transfers ownership.
  * Once graceful shutdown closes the gate, submission returns SHUTDOWN.
+ *
+ * The scheduler has no cancellation API. Callers must not attempt
+ * cancellation by changing a Task after submission; doing so violates the
+ * Task access contract and neither removes it from the queue nor guarantees
+ * that its callback will be skipped.
  */
 SchedulerResult scheduler_submit(Scheduler *scheduler, Task *task);
 SchedulerResult scheduler_try_submit(Scheduler *scheduler, Task *task);
