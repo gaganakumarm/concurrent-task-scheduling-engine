@@ -44,6 +44,7 @@ add_library(
     src/concurrent_scheduler.c
     src/concurrent_task_queue.c
     src/scheduler.c
+    src/scheduler_validation.c
     src/task.c
     src/task_queue.c
 )

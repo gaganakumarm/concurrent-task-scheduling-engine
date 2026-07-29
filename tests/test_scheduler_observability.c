@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct {
     SchedMutex mutex;
@@ -126,11 +127,306 @@ static int test_checked_counter(void)
     return EXIT_SUCCESS;
 }
 
+static SchedulerSnapshot valid_initialized_snapshot(void)
+{
+    SchedulerSnapshot snapshot = {0};
+
+    snapshot.version = CONCURRENT_SCHEDULER_SNAPSHOT_VERSION;
+    snapshot.consistency = SCHEDULER_SNAPSHOT_CONSISTENCY_DOMAIN_EXACT;
+    snapshot.state = SCHEDULER_SNAPSHOT_STATE_INITIALIZED;
+    snapshot.configured_worker_count = 2U;
+    snapshot.queue_capacity = 4U;
+    return snapshot;
+}
+
+static int result_has_issue(
+    const SchedulerValidationResult *result,
+    SchedulerValidationIssue issue
+)
+{
+    size_t index;
+
+    for (index = 0U; index < result->issue_count; ++index) {
+        if (result->issues[index].issue == issue) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int test_invariant_validation(void)
+{
+    SchedulerSnapshot snapshot = valid_initialized_snapshot();
+    SchedulerValidationResult result = {0};
+    SchedulerValidationResult repeated = {0};
+    SchedulerValidationResult preserved = {0};
+    SchedulerHealth health;
+    char buffer[512];
+    char short_buffer[8];
+    int required;
+
+    preserved.snapshot_version = UINT32_C(919);
+    result = preserved;
+    if (scheduler_snapshot_validate(NULL, SCHEDULER_VALIDATION_LIVE, &result)
+        || result.snapshot_version != preserved.snapshot_version
+        || scheduler_snapshot_validate(
+            &snapshot,
+            (SchedulerValidationMode)99,
+            &result
+        )
+        || scheduler_snapshot_validate(
+            &snapshot,
+            SCHEDULER_VALIDATION_LIVE,
+            NULL
+        )
+        || !scheduler_snapshot_validate(
+            &snapshot,
+            SCHEDULER_VALIDATION_LIVE,
+            &result
+        )
+        || result.issue_count != 0U
+        || !scheduler_snapshot_validate(
+            &snapshot,
+            SCHEDULER_VALIDATION_LIVE,
+            &repeated
+        )
+        || memcmp(&result, &repeated, sizeof(result)) != 0
+        || !scheduler_snapshot_derive_health(&snapshot, &result, &health)
+        || health != SCHEDULER_HEALTH_HEALTHY) {
+        return EXIT_FAILURE;
+    }
+    required = scheduler_validation_format(
+        &snapshot,
+        &result,
+        buffer,
+        sizeof(buffer)
+    );
+    if (required < 0
+        || strcmp(
+            buffer,
+            "mode=LIVE version=1 issues=0 violations=0 "
+            "advisories=0 incomplete=0 truncated=0"
+        ) != 0
+        || scheduler_validation_format(
+            &snapshot,
+            &result,
+            short_buffer,
+            sizeof(short_buffer)
+        ) != required
+        || short_buffer[sizeof(short_buffer) - 1U] != '\0'
+        || scheduler_validation_format(
+            &snapshot,
+            &result,
+            NULL,
+            0U
+        ) != required
+        || scheduler_validation_format(NULL, &result, buffer, sizeof(buffer))
+            != -1
+        || scheduler_validation_format(&snapshot, NULL, buffer, sizeof(buffer))
+            != -1
+        || scheduler_validation_format(&snapshot, &result, NULL, 1U) != -1
+        || strcmp(
+            scheduler_validation_issue_name(
+                SCHEDULER_VALIDATION_ISSUE_QUEUE_SIZE_EXCEEDS_CAPACITY
+            ),
+            "QUEUE_SIZE_EXCEEDS_CAPACITY"
+        ) != 0
+        || strcmp(scheduler_health_name(SCHEDULER_HEALTH_STOPPING), "STOPPING")
+            != 0) {
+        return EXIT_FAILURE;
+    }
+
+    snapshot.version++;
+    snapshot.consistency = (SchedulerSnapshotConsistency)99;
+    snapshot.queue_capacity = 1U;
+    snapshot.queue_current_size = 4U;
+    snapshot.queue_high_water_mark = 3U;
+    snapshot.configured_worker_count = 1U;
+    snapshot.created_worker_count = 2U;
+    snapshot.ready_worker_count = 3U;
+    snapshot.active_worker_count = 3U;
+    snapshot.joined_worker_count = 3U;
+    snapshot.currently_running_count = 4U;
+    snapshot.submitted_count = 1U;
+    snapshot.accepted_count = 3U;
+    snapshot.rejected_count = 2U;
+    snapshot.dequeued_count = 4U;
+    snapshot.callback_started_count = 5U;
+    snapshot.callback_succeeded_count = 4U;
+    snapshot.callback_failed_count = 3U;
+    snapshot.submissions_open = true;
+    snapshot.shutdown_started = true;
+    if (!scheduler_snapshot_validate(
+            &snapshot,
+            SCHEDULER_VALIDATION_LIVE,
+            &result
+        )
+        || result.violation_count <= SCHEDULER_VALIDATION_ISSUE_CAPACITY
+        || !result.issues_truncated
+        || result.issue_count != SCHEDULER_VALIDATION_ISSUE_CAPACITY
+        || !result_has_issue(
+            &result,
+            SCHEDULER_VALIDATION_ISSUE_SNAPSHOT_VERSION_UNSUPPORTED
+        )
+        || !result_has_issue(
+            &result,
+            SCHEDULER_VALIDATION_ISSUE_QUEUE_SIZE_EXCEEDS_CAPACITY
+        )
+        || !scheduler_snapshot_derive_health(&snapshot, &result, &health)
+        || health != SCHEDULER_HEALTH_FAILED) {
+        return EXIT_FAILURE;
+    }
+
+    snapshot = valid_initialized_snapshot();
+    snapshot.overflow_detected = true;
+    snapshot.queue_current_size = 5U;
+    if (!scheduler_snapshot_validate(
+            &snapshot,
+            SCHEDULER_VALIDATION_QUIESCENT,
+            &result
+        )
+        || !result.validation_incomplete
+        || result.violation_count == 0U
+        || !result_has_issue(
+            &result,
+            SCHEDULER_VALIDATION_ISSUE_ACCOUNTING_OVERFLOW
+        )
+        || !result_has_issue(
+            &result,
+            SCHEDULER_VALIDATION_ISSUE_QUEUE_SIZE_EXCEEDS_CAPACITY
+        )) {
+        return EXIT_FAILURE;
+    }
+
+    snapshot = valid_initialized_snapshot();
+    snapshot.state = SCHEDULER_SNAPSHOT_STATE_RUNNING;
+    snapshot.submissions_open = true;
+    snapshot.created_worker_count = 2U;
+    snapshot.ready_worker_count = 2U;
+    snapshot.active_worker_count = 2U;
+    snapshot.submitted_count = 8U;
+    snapshot.accepted_count = 7U;
+    snapshot.rejected_count = 0U;
+    snapshot.dequeued_count = 6U;
+    snapshot.callback_started_count = 5U;
+    snapshot.callback_succeeded_count = 4U;
+    snapshot.currently_running_count = 1U;
+    snapshot.queue_current_size = 1U;
+    snapshot.queue_high_water_mark = 4U;
+    if (!scheduler_snapshot_validate(
+            &snapshot,
+            SCHEDULER_VALIDATION_LIVE,
+            &result
+        )
+        || result.violation_count != 0U
+        || !scheduler_snapshot_validate(
+            &snapshot,
+            SCHEDULER_VALIDATION_QUIESCENT,
+            &result
+        )
+        || !result.validation_incomplete
+        || !result_has_issue(
+            &result,
+            SCHEDULER_VALIDATION_ISSUE_QUIESCENT_MODE_NOT_APPLICABLE
+        )
+        || !scheduler_snapshot_derive_health(&snapshot, &result, &health)
+        || health != SCHEDULER_HEALTH_DEGRADED) {
+        return EXIT_FAILURE;
+    }
+
+    snapshot = valid_initialized_snapshot();
+    snapshot.state = SCHEDULER_SNAPSHOT_STATE_STOPPED;
+    snapshot.shutdown_started = true;
+    snapshot.created_worker_count = 2U;
+    snapshot.joined_worker_count = 2U;
+    snapshot.submitted_count = 4U;
+    snapshot.accepted_count = 3U;
+    snapshot.rejected_count = 1U;
+    snapshot.dequeued_count = 3U;
+    snapshot.callback_started_count = 3U;
+    snapshot.callback_succeeded_count = 2U;
+    snapshot.callback_failed_count = 1U;
+    snapshot.queue_high_water_mark = 3U;
+    if (!scheduler_snapshot_validate(
+            &snapshot,
+            SCHEDULER_VALIDATION_QUIESCENT,
+            &result
+        )
+        || result.violation_count != 0U
+        || result.validation_incomplete
+        || !scheduler_snapshot_derive_health(&snapshot, &result, &health)
+        || health != SCHEDULER_HEALTH_STOPPED) {
+        return EXIT_FAILURE;
+    }
+    snapshot.accepted_count--;
+    if (!scheduler_snapshot_validate(
+            &snapshot,
+            SCHEDULER_VALIDATION_QUIESCENT,
+            &result
+        )
+        || !result_has_issue(
+            &result,
+            SCHEDULER_VALIDATION_ISSUE_SUBMISSION_BALANCE_MISMATCH
+        )
+        || !result_has_issue(
+            &result,
+            SCHEDULER_VALIDATION_ISSUE_ACCEPTED_DEQUEUED_MISMATCH
+        )) {
+        return EXIT_FAILURE;
+    }
+
+    snapshot = valid_initialized_snapshot();
+    snapshot.state = SCHEDULER_SNAPSHOT_STATE_SHUTTING_DOWN;
+    snapshot.shutdown_started = true;
+    if (!scheduler_snapshot_validate(
+            &snapshot,
+            SCHEDULER_VALIDATION_LIVE,
+            &result
+        )
+        || !scheduler_snapshot_derive_health(&snapshot, &result, &health)
+        || health != SCHEDULER_HEALTH_STOPPING) {
+        return EXIT_FAILURE;
+    }
+    snapshot.state = SCHEDULER_SNAPSHOT_STATE_RUNNING;
+    snapshot.shutdown_started = false;
+    snapshot.submissions_open = true;
+    snapshot.callback_failed_count = 1U;
+    snapshot.callback_started_count = 1U;
+    snapshot.dequeued_count = 1U;
+    snapshot.accepted_count = 1U;
+    snapshot.submitted_count = 1U;
+    if (!scheduler_snapshot_validate(
+            &snapshot,
+            SCHEDULER_VALIDATION_LIVE,
+            &result
+        )
+        || !scheduler_snapshot_derive_health(&snapshot, &result, &health)
+        || health != SCHEDULER_HEALTH_DEGRADED) {
+        return EXIT_FAILURE;
+    }
+    snapshot.state = SCHEDULER_SNAPSHOT_STATE_FAILED;
+    snapshot.submissions_open = false;
+    if (!scheduler_snapshot_validate(
+            &snapshot,
+            SCHEDULER_VALIDATION_LIVE,
+            &result
+        )
+        || !scheduler_snapshot_derive_health(&snapshot, &result, &health)
+        || health != SCHEDULER_HEALTH_FAILED
+        || scheduler_snapshot_derive_health(NULL, &result, &health)
+        || scheduler_snapshot_derive_health(&snapshot, NULL, &health)
+        || scheduler_snapshot_derive_health(&snapshot, &result, NULL)) {
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
+}
+
 static int test_snapshot_lifecycle(void)
 {
     Scheduler scheduler = {0};
     SchedulerSnapshot snapshot = {0};
     SchedulerSnapshot preserved = {0};
+    SchedulerValidationResult validation = {0};
     ObservabilityCallbackContext context = {0};
     Task tasks[4] = {0};
     size_t index;
@@ -182,7 +478,13 @@ static int test_snapshot_lifecycle(void)
         || snapshot.queue_current_size != 0U
         || snapshot.queue_high_water_mark != 0U
         || !scheduler_snapshot_validate_basic(&snapshot)
-        || !scheduler_snapshot_validate_quiescent(&snapshot)) {
+        || !scheduler_snapshot_validate_quiescent(&snapshot)
+        || !scheduler_snapshot_validate(
+            &snapshot,
+            SCHEDULER_VALIDATION_LIVE,
+            &validation
+        )
+        || validation.violation_count != 0U) {
         goto cleanup;
     }
     if (scheduler_start(&scheduler) != SCHEDULER_OK
@@ -191,7 +493,13 @@ static int test_snapshot_lifecycle(void)
         || !snapshot.submissions_open
         || snapshot.created_worker_count != 1U
         || snapshot.ready_worker_count != 1U
-        || snapshot.active_worker_count != 1U) {
+        || snapshot.active_worker_count != 1U
+        || !scheduler_snapshot_validate(
+            &snapshot,
+            SCHEDULER_VALIDATION_LIVE,
+            &validation
+        )
+        || validation.violation_count != 0U) {
         goto cleanup;
     }
     if (scheduler_submit(&scheduler, &tasks[0]) != SCHEDULER_OK
@@ -211,7 +519,13 @@ static int test_snapshot_lifecycle(void)
         || snapshot.callback_failed_count != 0U
         || snapshot.queue_current_size != 2U
         || snapshot.queue_high_water_mark != 2U
-        || !scheduler_snapshot_validate_basic(&snapshot)) {
+        || !scheduler_snapshot_validate_basic(&snapshot)
+        || !scheduler_snapshot_validate(
+            &snapshot,
+            SCHEDULER_VALIDATION_LIVE,
+            &validation
+        )
+        || validation.violation_count != 0U) {
         goto cleanup;
     }
     if (scheduler_shutdown(&scheduler) != SCHEDULER_OK
@@ -244,7 +558,14 @@ static int test_snapshot_lifecycle(void)
         || snapshot.queue_current_size != 0U
         || snapshot.queue_high_water_mark != 2U
         || snapshot.overflow_detected
-        || !scheduler_snapshot_validate_quiescent(&snapshot)) {
+        || !scheduler_snapshot_validate_quiescent(&snapshot)
+        || !scheduler_snapshot_validate(
+            &snapshot,
+            SCHEDULER_VALIDATION_QUIESCENT,
+            &validation
+        )
+        || validation.violation_count != 0U
+        || validation.validation_incomplete) {
         goto cleanup;
     }
     if (scheduler_join(&scheduler) != SCHEDULER_OK
@@ -290,12 +611,13 @@ cleanup:
 int main(void)
 {
     if (test_checked_counter() != EXIT_SUCCESS
-        || test_snapshot_lifecycle() != EXIT_SUCCESS) {
+        || test_snapshot_lifecycle() != EXIT_SUCCESS
+        || test_invariant_validation() != EXIT_SUCCESS) {
         fprintf(stderr, "Scheduler observability tests failed.\n");
         return EXIT_FAILURE;
     }
     printf(
-        "OBSERVABILITY-001 through OBSERVABILITY-020 passed.\n"
+        "OBSERVABILITY-001 through OBSERVABILITY-045 passed.\n"
     );
     return EXIT_SUCCESS;
 }

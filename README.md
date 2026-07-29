@@ -110,6 +110,9 @@ Phase 6 reliability and observability architecture is in progress. Runtime
 accounting and a test-only private hybrid snapshot are implemented; no public
 monitoring API exists. Fault injection, recovery, and watchdog behavior remain
 unimplemented.
+Private lifecycle-invariant validation, derived health, and deterministic
+fixed-buffer formatting are also implemented. Validation is explicit and does
+not enforce or alter runtime behavior.
 
 ## Planned Architecture
 

@@ -394,3 +394,10 @@ hybrid lifecycle → worker/per-worker-atomic → queue capture order. Callback
 outcomes use cache-line-aligned, lock-free, single-writer C17 atomic slots to
 avoid a new callback mutex acquisition. The interface remains private; health
 thresholds, invariant enforcement, and fault injection remain unimplemented.
+
+Checkpoint 6.3 implementation note: private validation separates live-safe
+structural bounds from quiescent accounting identities. Overflow makes
+accounting validation incomplete while structural checks continue. Health is
+derived, and fixed-buffer diagnostics are explicit, deterministic,
+allocation-free, and silent. No validator call is present in a scheduler
+execution path.

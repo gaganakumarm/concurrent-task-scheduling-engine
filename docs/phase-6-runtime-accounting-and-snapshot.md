@@ -141,6 +141,11 @@ beyond the nominal safeguard but smaller than either run’s variability, so it
 is treated as noisy and not a demonstrated meaningful regression. No
 statistical significance is claimed. Phase 6.3 should retain an overhead gate.
 
+Checkpoint 6.3 consumes snapshots through the private pure model documented in
+[Phase 6 lifecycle invariant validation](phase-6-lifecycle-invariant-validation.md).
+Live hybrid snapshots use structural bounds; exact cross-domain balances remain
+quiescent-only.
+
 ## 14. Test strategy
 
 `concurrent_scheduler_observability_tests` uses test-controlled mutexes and
