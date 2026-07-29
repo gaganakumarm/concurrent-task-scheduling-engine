@@ -23,6 +23,11 @@ option(
     "Use transition-aware queue condition signaling"
     OFF
 )
+option(
+    CONCURRENT_SCHEDULER_ENABLE_FAULT_INJECTION
+    "Enable private deterministic scheduler fault injection for testing"
+    OFF
+)
 
 function(concurrent_scheduler_enable_warnings target)
     if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
@@ -48,6 +53,19 @@ add_library(
     src/task.c
     src/task_queue.c
 )
+
+if(CONCURRENT_SCHEDULER_ENABLE_FAULT_INJECTION)
+    target_sources(
+        concurrent_scheduler_core
+        PRIVATE
+            src/scheduler_fault_injection.c
+    )
+    target_compile_definitions(
+        concurrent_scheduler_core
+        PRIVATE
+            CONCURRENT_SCHEDULER_ENABLE_FAULT_INJECTION=1
+    )
+endif()
 
 target_include_directories(
     concurrent_scheduler_core
@@ -280,6 +298,42 @@ if(WIN32)
         NAME concurrent_scheduler.observability
         COMMAND concurrent_scheduler_observability_tests
     )
+
+    if(CONCURRENT_SCHEDULER_ENABLE_FAULT_INJECTION)
+        add_executable(
+            concurrent_scheduler_fault_injection_tests
+            tests/test_scheduler_fault_injection.c
+        )
+
+        target_include_directories(
+            concurrent_scheduler_fault_injection_tests
+            PRIVATE
+                "${PROJECT_SOURCE_DIR}/src"
+                "${PROJECT_SOURCE_DIR}/src/platform"
+        )
+
+        target_compile_definitions(
+            concurrent_scheduler_fault_injection_tests
+            PRIVATE
+                CONCURRENT_SCHEDULER_ENABLE_FAULT_INJECTION=1
+        )
+
+        target_link_libraries(
+            concurrent_scheduler_fault_injection_tests
+            PRIVATE
+                concurrent_scheduler_core
+                concurrent_scheduler_platform_sync
+        )
+
+        concurrent_scheduler_enable_warnings(
+            concurrent_scheduler_fault_injection_tests
+        )
+
+        add_test(
+            NAME concurrent_scheduler.fault_injection
+            COMMAND concurrent_scheduler_fault_injection_tests
+        )
+    endif()
 
     add_executable(
         concurrent_scheduler_benchmarks

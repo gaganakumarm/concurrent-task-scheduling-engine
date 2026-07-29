@@ -401,3 +401,10 @@ accounting validation incomplete while structural checks continue. Health is
 derived, and fixed-buffer diagnostics are explicit, deterministic,
 allocation-free, and silent. No validator call is present in a scheduler
 execution path.
+
+Checkpoint 6.4 implementation note: deterministic fault plans are private,
+per-scheduler, and compiled only when the default-OFF fault-injection option is
+enabled. Initial seams cover worker-array allocation, worker creation, and
+post-native-join result rejection. Disabled builds contain no plan storage or
+fault checks, and worker-startup injection remains deferred because readiness
+arrival order is scheduling-dependent.

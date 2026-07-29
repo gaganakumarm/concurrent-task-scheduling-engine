@@ -122,6 +122,9 @@ The interface is private, issue capacity is fixed, health has no timing signal,
 and live hybrid snapshots cannot prove cross-domain equalities. Validation is
 explicit rather than automatic.
 
+Deterministic failure snapshots used by Checkpoint 6.4 are described in
+[Phase 6 deterministic fault injection](phase-6-deterministic-fault-injection.md).
+
 ## 16. Acceptance results
 
 Normal and profiling builds are warning-free. Seven of seven CTests, all

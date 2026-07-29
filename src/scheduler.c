@@ -2,6 +2,9 @@
 
 #include "concurrent_scheduler/concurrent_task_queue.h"
 #include "internal/scheduler_observability.h"
+#if defined(CONCURRENT_SCHEDULER_ENABLE_FAULT_INJECTION)
+#include "internal/scheduler_fault_injection.h"
+#endif
 #include "platform/sync.h"
 #if defined(CONCURRENT_SCHEDULER_ENABLE_PROFILING)
 #include "internal/scheduler_profiling.h"
@@ -72,6 +75,9 @@ struct SchedulerImplementation {
     bool worker_accounting_overflow;
     int worker_infrastructure_failure;
     int worker_sync_initialized;
+#if defined(CONCURRENT_SCHEDULER_ENABLE_FAULT_INJECTION)
+    SchedulerFaultPlan fault_plan;
+#endif
 };
 
 enum {
@@ -349,6 +355,23 @@ static SchedulerResult release_workers(SchedulerImplementation *implementation)
             all_joined = 0;
             continue;
         }
+#if defined(CONCURRENT_SCHEDULER_ENABLE_FAULT_INJECTION)
+        if (scheduler_fault_should_trigger(
+                &implementation->fault_plan,
+                SCHEDULER_FAULT_WORKER_JOIN
+            )) {
+            if (sched_mutex_lock(&implementation->worker_mutex)
+                == SCHED_SYNC_OK) {
+                scheduler_observability_increment_saturating(
+                    &implementation->join_failure_count,
+                    &implementation->worker_accounting_overflow
+                );
+                (void)sched_mutex_unlock(&implementation->worker_mutex);
+            }
+            result = SCHEDULER_ERROR_SYSTEM;
+            worker_result = WORKER_RESULT_SYNCHRONIZATION;
+        }
+#endif
         if (worker_result != WORKER_RESULT_OK) {
             result = SCHEDULER_ERROR_SYSTEM;
         } else if (sched_mutex_lock(&implementation->worker_mutex)
@@ -551,6 +574,9 @@ SchedulerResult scheduler_init(
     implementation->execute_context = execute_context;
     implementation->worker_count = worker_count;
     implementation->state = SCHEDULER_STATE_INITIALIZED;
+#if defined(CONCURRENT_SCHEDULER_ENABLE_FAULT_INJECTION)
+    scheduler_fault_plan_init(&implementation->fault_plan);
+#endif
     scheduler->implementation = implementation;
     return SCHEDULER_OK;
 }
@@ -591,14 +617,28 @@ SchedulerResult scheduler_start(Scheduler *scheduler)
         return SCHEDULER_ERROR_ALLOCATION;
     }
 
-    implementation->threads = calloc(
-        implementation->worker_count,
-        sizeof(*implementation->threads)
-    );
-    implementation->worker_contexts = calloc(
-        implementation->worker_count,
-        sizeof(*implementation->worker_contexts)
-    );
+    implementation->threads =
+#if defined(CONCURRENT_SCHEDULER_ENABLE_FAULT_INJECTION)
+        scheduler_fault_should_trigger(
+            &implementation->fault_plan,
+            SCHEDULER_FAULT_ALLOCATION
+        ) ? NULL :
+#endif
+        calloc(
+            implementation->worker_count,
+            sizeof(*implementation->threads)
+        );
+    implementation->worker_contexts =
+#if defined(CONCURRENT_SCHEDULER_ENABLE_FAULT_INJECTION)
+        scheduler_fault_should_trigger(
+            &implementation->fault_plan,
+            SCHEDULER_FAULT_ALLOCATION
+        ) ? NULL :
+#endif
+        calloc(
+            implementation->worker_count,
+            sizeof(*implementation->worker_contexts)
+        );
     if (implementation->threads == NULL
         || implementation->worker_contexts == NULL) {
         free(implementation->worker_contexts);
@@ -672,7 +712,15 @@ SchedulerResult scheduler_start(Scheduler *scheduler)
             );
             return SCHEDULER_ERROR_SYSTEM;
         }
-        if (sched_thread_create(
+        if (
+#if defined(CONCURRENT_SCHEDULER_ENABLE_FAULT_INJECTION)
+            scheduler_fault_should_trigger(
+                &implementation->fault_plan,
+                SCHEDULER_FAULT_WORKER_CREATION
+            )
+            ||
+#endif
+            sched_thread_create(
                 &implementation->threads[index],
                 scheduler_worker_entry,
                 &implementation->worker_contexts[index]
@@ -964,6 +1012,73 @@ const char *scheduler_result_name(SchedulerResult result)
         return "UNKNOWN";
     }
 }
+
+#if defined(CONCURRENT_SCHEDULER_ENABLE_FAULT_INJECTION)
+bool scheduler_fault_configure(
+    Scheduler *scheduler,
+    SchedulerFaultPoint point,
+    uint64_t trigger_occurrence
+)
+{
+    SchedulerImplementation *implementation;
+    bool configured = false;
+
+    if (scheduler == NULL || scheduler->implementation == NULL) {
+        return false;
+    }
+    implementation = scheduler->implementation;
+    if (sched_mutex_lock(&implementation->lifecycle_mutex)
+        != SCHED_SYNC_OK) {
+        return false;
+    }
+    if (implementation->state == SCHEDULER_STATE_INITIALIZED) {
+        configured = scheduler_fault_plan_configure(
+            &implementation->fault_plan,
+            point,
+            trigger_occurrence
+        );
+    }
+    if (sched_mutex_unlock(&implementation->lifecycle_mutex)
+        != SCHED_SYNC_OK) {
+        return false;
+    }
+    return configured;
+}
+
+bool scheduler_fault_reset(Scheduler *scheduler)
+{
+    SchedulerImplementation *implementation;
+
+    if (scheduler == NULL || scheduler->implementation == NULL) {
+        return false;
+    }
+    implementation = scheduler->implementation;
+    if (sched_mutex_lock(&implementation->lifecycle_mutex)
+        != SCHED_SYNC_OK) {
+        return false;
+    }
+    scheduler_fault_plan_reset(&implementation->fault_plan);
+    if (sched_mutex_unlock(&implementation->lifecycle_mutex)
+        != SCHED_SYNC_OK) {
+        return false;
+    }
+    return true;
+}
+
+bool scheduler_fault_capture_plan(
+    Scheduler *scheduler,
+    SchedulerFaultPlanSnapshot *snapshot
+)
+{
+    if (scheduler == NULL || scheduler->implementation == NULL) {
+        return false;
+    }
+    return scheduler_fault_plan_capture(
+        &((SchedulerImplementation *)scheduler->implementation)->fault_plan,
+        snapshot
+    );
+}
+#endif
 
 static SchedulerSnapshotState snapshot_state_from_internal(
     SchedulerState state
