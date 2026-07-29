@@ -1,8 +1,8 @@
-# Phase 6 reliability completion
+# Scheduler Reliability Report
 
 ## Overview
 
-Checkpoint 6.5 completes the planned Phase 6 validation layer by exercising
+Verification step 6.5 completes the planned Reliability and Observability validation layer by exercising
 remaining deterministic lifecycle and cleanup paths. It changes no scheduler,
 queue, worker, public API, fault model, or production execution behavior.
 
@@ -63,7 +63,7 @@ health while retaining no live native thread.
 ## Fault-framework extensions
 
 None. Existing allocation, worker-creation, and post-native-join seams are
-sufficient for this checkpoint. Avoiding new seams preserves deterministic
+sufficient for this verification step. Avoiding new seams preserves deterministic
 behavior and keeps production builds unchanged.
 
 ## Unsupported scenarios
@@ -85,16 +85,16 @@ sleep or timing oracle is used.
 ## Production compatibility
 
 Fault injection remains default OFF and compiled out of normal, benchmark, and
-profiling builds. This checkpoint changes only fault-enabled tests and
+profiling builds. This verification step changes only fault-enabled tests and
 documentation, so it adds no production data, branch, lock, atomic operation,
 allocation, or runtime call.
 
 ## Future extension points
 
-A later phase may design backend-owned deterministic initialization seams or a
+A future change may design backend-owned deterministic initialization seams or a
 stable readiness ordinal, but only with explicit ownership, cleanup, and
-compile-out contracts. Phase 7 should begin with a separate architecture
-decision rather than extending Phase 6 implicitly.
+compile-out contracts. Scalability and Stability should begin with a separate architecture
+decision rather than extending Reliability and Observability implicitly.
 
 ## Known limitations
 
@@ -102,7 +102,7 @@ The tests prove deterministic control-flow cleanup and accounting but do not
 replace external handle, heap, or sanitizer leak tooling. Platform failure
 paths that cannot be selected deterministically remain unverified.
 
-## Checkpoint decision
+## Decision
 
 Final approval depends on successful production, fault, benchmark, profiling,
 documentation, and repository-hygiene validation.

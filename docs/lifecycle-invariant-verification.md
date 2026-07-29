@@ -1,8 +1,8 @@
-# Phase 6 lifecycle invariant validation
+# Scheduler Lifecycle Invariant Verification
 
 ## 1. Executive summary
 
-Checkpoint 6.3 adds a private, pure validator for version 1 scheduler
+Verification step 6.3 adds a private, pure validator for version 1 scheduler
 snapshots. It reports stable issues, derives health, and formats deterministic
 diagnostics without changing scheduler execution.
 
@@ -113,8 +113,8 @@ Candidate median differences are -3.950% for no-op and +1.859% for medium
 CPU. Both are within the 5% safeguard. Wide overlapping ranges, including a
 low candidate medium outlier, prevent a statistical claim, but the result does
 not corroborate the earlier medium regression. Code inspection confirms
-Checkpoint 6.3 adds no hot-path call, write, or lock. Raw CSV and the baseline
-build are retained under ignored `build/checkpoint-6.3-performance-raw/`.
+Verification step 6.3 adds no hot-path call, write, or lock. Raw CSV and the baseline
+build are retained under ignored `build/verification step-6.3-performance-raw/`.
 
 ## 15. Known limitations
 
@@ -122,17 +122,17 @@ The interface is private, issue capacity is fixed, health has no timing signal,
 and live hybrid snapshots cannot prove cross-domain equalities. Validation is
 explicit rather than automatic.
 
-Deterministic failure snapshots used by Checkpoint 6.4 are described in
-[Phase 6 deterministic fault injection](phase-6-deterministic-fault-injection.md).
+Deterministic failure snapshots used by Verification step 6.4 are described in
+[Reliability and Observability deterministic fault injection](deterministic-fault-injection.md).
 
 ## 16. Acceptance results
 
 Normal and profiling builds are warning-free. Seven of seven CTests, all
 direct test executables, the main regression, and both benchmark self-tests
-pass. Public headers and Phase 5 evidence are unchanged. Final link and
-repository hygiene results are recorded in the checkpoint report.
+pass. Public headers and Performance Evaluation evidence are unchanged. Final link and
+repository hygiene results are recorded in the verification step report.
 
-## 17. Checkpoint decision
+## 17. Decision
 
 The functional and performance acceptance gates support approval, subject to
 the final repository hygiene audit.

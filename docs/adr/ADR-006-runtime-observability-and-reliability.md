@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted for Phase 6 architecture; implementation deferred to later
-checkpoints.
+Accepted for Reliability and Observability architecture; implementation deferred to later
+verification steps.
 
 ## Context
 
@@ -25,7 +25,7 @@ deterministic testing without affecting normal production builds.
   `CONCURRENT_SCHEDULER_ENABLE_FAULT_INJECTION`, default `OFF`.
 - Put stress/fault diagnostics in a separate reliability test executable.
 - Keep library operation quiet and preserve the existing public API.
-- Make no production semantic change in Checkpoint 6.1.
+- Make no production semantic change in Verification step 6.1.
 
 ## Considered alternatives
 
@@ -48,7 +48,7 @@ skew. On-demand reads can briefly block one domain. Internal schema evolution
 remains possible. Reliability tests gain deterministic, structured failure
 evidence without exposing native resources.
 
-Implementation clarification from Checkpoint 6.2: lifecycle and structural
+Implementation clarification from Verification step 6.2: lifecycle and structural
 worker fields use existing mutexes. Hot callback outcomes use cache-line-aligned
 per-worker C17 atomic slots with one writer and snapshot readers. The build
 requires lock-free 64-bit atomics and verifies this at compile time. This avoids
@@ -57,13 +57,13 @@ both a new lock order and shared callback-accounting cache lines.
 ## Compatibility
 
 No public header, callback signature, Task representation, lifecycle rule,
-queue semantic, shutdown behavior, ownership contract, or default Phase 5
+queue semantic, shutdown behavior, ownership contract, or default Performance Evaluation
 option changes. A future public diagnostic API requires a separate decision.
 
 ## Performance implications
 
 Implementation should reuse existing locks, avoid timestamps, allocation, and
-I/O on Task paths, and measure overhead against Phase 5. If mandatory
+I/O on Task paths, and measure overhead against Performance Evaluation. If mandatory
 accounting materially regresses ordinary performance, reduce the field set or
 gate diagnostics rather than accepting an unmeasured cost.
 
@@ -76,7 +76,7 @@ The normal build must prove fault injection inactive.
 
 ## Rollback strategy
 
-Checkpoint 6.1 is documentation-only and can be reverted without runtime
+Verification step 6.1 is documentation-only and can be reverted without runtime
 effect. Later counters, snapshots, or injection hooks must be removable as one
 private layer. Any semantic regression, deadlock, data race, false invariant,
 or unacceptable overhead requires rollback to the previously validated

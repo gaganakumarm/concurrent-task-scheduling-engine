@@ -1,4 +1,4 @@
-# Checkpoint 5.3 measurement environment
+# Contention profiling measurement environment
 
 - Baseline commit: `acbe5481264beee876de734e162567a57b6901b2`
 - OS: Windows NT 10.0.26200.0, AMD64

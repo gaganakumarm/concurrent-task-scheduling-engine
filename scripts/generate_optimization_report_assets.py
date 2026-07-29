@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate and summarize the Checkpoint 5.4 control/candidate evidence."""
+"""Validate and summarize the Verification step 5.4 control/candidate evidence."""
 
 import csv
 import statistics

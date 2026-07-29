@@ -1,9 +1,9 @@
 # Concurrent Task Scheduling Engine
 
-A C17 bounded task scheduler for Windows with a fixed worker pool,
+A production-ready C17 bounded task scheduler for Windows with a fixed worker pool,
 multi-producer submission, deterministic shutdown and join, private runtime
 accounting, lifecycle validation, fault-injection testing, and reproducible
-performance evidence. Version: **1.0.0 release candidate**.
+performance evidence.
 
 ## Key capabilities
 
@@ -39,7 +39,7 @@ Fault-injection tests cover allocation failure, partial worker startup, join
 failure, lifecycle misuse, and repeated cleanup. Fault injection is OFF by
 default.
 
-See the [Phase 6 reliability completion report](docs/phase-6-reliability-completion.md).
+See the [scheduler reliability report](docs/reliability-report.md).
 
 ## Performance summary
 
@@ -50,8 +50,7 @@ continued scaling through eight logical workers. These configuration-specific
 measurements are not cross-machine guarantees. The shared bounded queue remains
 the measured tiny-task bottleneck.
 
-See the
-[Phase 7.1 performance report](docs/phase-7-performance-scalability-validation.md).
+See the [scalability and stability report](docs/scalability-and-stability.md).
 
 ## Build requirements
 
@@ -74,7 +73,6 @@ cmake --build build
 Expected output includes:
 
 ```text
-Version: 1.0.0
 Status: initialized
 ```
 
@@ -167,11 +165,11 @@ docs/                          Architecture and validation evidence
 
 ## Documentation
 
-- [Worker-pool architecture](docs/phase-4-worker-pool-architecture.md)
-- [Phase 5 performance index](docs/phase-5-performance-index.md)
-- [Phase 6 reliability architecture](docs/phase-6-reliability-observability-architecture.md)
-- [Phase 7.1 performance validation](docs/phase-7-performance-scalability-validation.md)
-- [Phase 7.2 robustness audit](docs/phase-7-robustness-static-analysis.md)
+- [Worker-pool architecture](docs/worker-pool-architecture.md)
+- [Performance evidence index](docs/performance-evidence-index.md)
+- [Reliability and observability architecture](docs/reliability-and-observability-architecture.md)
+- [Scalability and stability](docs/scalability-and-stability.md)
+- [Robustness and static analysis](docs/robustness-and-static-analysis.md)
 - [v1.0.0 release notes](docs/releases/v1.0.0.md)
 
 ## Known limitations
@@ -185,11 +183,11 @@ docs/                          Architecture and validation evidence
   installation; no dynamic-sanitizer coverage is claimed.
 - Fault injection and profiling are private compile-time diagnostics.
 
-## Version
+## Release
 
-The release candidate version is **1.0.0**. CMake `project(VERSION ...)` is the
-canonical source used by runtime version reporting, tests, and benchmark
-metadata. The recommended final tag is `v1.0.0`; it has not been created.
+The current release is **1.0.0**. CMake `project(VERSION ...)` remains the
+canonical source for runtime reporting, tests, and benchmark metadata. The
+repository tag is `v1.0.0`.
 
 ## License
 

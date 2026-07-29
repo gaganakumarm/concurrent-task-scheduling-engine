@@ -1,15 +1,15 @@
-# Phase 4 Worker Pool and Shutdown Architecture
+# Worker Pool and Scheduler Lifecycle Architecture
 
 ## 1. Purpose
 
-This document defines the Phase 4 design for graceful queue shutdown, a
+This document defines the Worker Pool and Scheduler Lifecycle design for graceful queue shutdown, a
 fixed-size worker pool, callback-based task execution, scheduler lifecycle,
 failure cleanup, and deterministic testing. It is an architecture decision and
 implementation plan only. It does not introduce production behavior.
 
-## 2. Existing Phase 3 Foundation
+## 2. Existing synchronized queue foundation
 
-Phase 3 provides:
+The synchronized queue foundation provides:
 
 - caller-owned `Task` objects;
 - a fixed-capacity, non-thread-safe `TaskQueue`;
@@ -22,17 +22,17 @@ Phase 3 provides:
 
 The synchronization abstraction already declares
 `sched_condition_broadcast`, and the Windows backend implements it with
-`WakeAllConditionVariable`. Phase 4 needs broader backend tests for broadcast,
+`WakeAllConditionVariable`. Worker Pool and Scheduler Lifecycle needs broader backend tests for broadcast,
 not a second broadcast operation.
 
-Checkpoint 4.3 implements the queue-level shutdown state and wake-up semantics
-described below. Checkpoint 4.4 audits its linearization, exact accounting,
+Verification step 4.3 implements the queue-level shutdown state and wake-up semantics
+described below. Verification step 4.4 audits its linearization, exact accounting,
 wraparound, waiter release, and destruction constraints. Scheduler and
 worker-pool behavior remains deferred.
 
-## 3. Phase 4 Goals
+## 3. Worker Pool and Scheduler Lifecycle Goals
 
-Phase 4 will provide:
+Worker Pool and Scheduler Lifecycle will provide:
 
 - an irreversible, idempotent queue shutdown request;
 - wake-up of every blocked producer and consumer;
@@ -48,7 +48,7 @@ Phase 4 will provide:
 
 ## 4. Non-Goals
 
-Phase 4 excludes dynamic worker scaling, work stealing, thread priorities, CPU
+Worker Pool and Scheduler Lifecycle excludes dynamic worker scaling, work stealing, thread priorities, CPU
 affinity, delayed or recurring scheduling, dependency graphs, retries,
 persistence, networking, process pools, lock-free queues, forced termination,
 in-flight cancellation, production logging, public metrics, a POSIX backend,
@@ -105,7 +105,7 @@ accurate, while empty and full describe only queue storage.
 
 ## 7. Drain-Before-Exit Decision
 
-Phase 4 uses graceful draining, not immediate discard.
+Worker Pool and Scheduler Lifecycle uses graceful draining, not immediate discard.
 
 After shutdown becomes visible, queued Tasks remain in FIFO order and may be
 removed. Consumers exit only when shutdown is active and the queue is empty.
@@ -116,7 +116,7 @@ callback attempt.
 The scheduler cannot promise callback success, only that an accepted Task is
 drained to a worker unless an infrastructure failure prevents it. Any Tasks
 that cannot be attempted after infrastructure failure remain caller-owned;
-Phase 4 must document that the caller needs external lifetime and accounting
+Worker Pool and Scheduler Lifecycle must document that the caller needs external lifetime and accounting
 to identify such Tasks. It does not add a return-unprocessed API.
 
 ## 8. Condition Broadcast Requirement
@@ -132,15 +132,15 @@ The existing backend operation is sufficient:
 SchedSyncResult sched_condition_broadcast(SchedCondition *condition);
 ```
 
-Checkpoint 4.2 validates the existing operation with invalid-argument and
+Verification step 4.2 validates the existing operation with invalid-argument and
 deterministic multiple-waiter broadcast tests using test-owned predicates and
 synchronization. Native Windows types remain confined to the backend. This
-backend checkpoint did not implement queue shutdown. Checkpoint 4.3 now uses
+backend verification step did not implement queue shutdown. Verification step 4.3 now uses
 the validated operation to broadcast both not-empty and not-full.
 
 ## 9. Queue API Changes
 
-Checkpoint 4.3 adds the smallest required public mutation API:
+Verification step 4.3 adds the smallest required public mutation API:
 
 ```c
 ConcurrentTaskQueueResult concurrent_task_queue_shutdown(
@@ -175,7 +175,7 @@ queue drains; otherwise it returns `SHUTDOWN`.
 
 ## 10. Scheduler Public API Proposal
 
-Checkpoint 4.5 adopts these public foundation types:
+Verification step 4.5 adopts these public foundation types:
 
 ```c
 typedef struct {
@@ -229,7 +229,7 @@ init -> start -> submit -> shutdown -> join -> destroy
 `scheduler_try_submit` delegates to nonblocking enqueue. Both register under
 the lifecycle gate before entering the queue and deregister afterward.
 
-### Checkpoint 4.6 Start Decision
+### Worker start decision
 
 The private implementation contains:
 
@@ -289,7 +289,7 @@ The transitions are:
   complete cleanup still reaches `STOPPED`, while a retained unjoined worker
   leaves `FAILED` for a later cleanup attempt.
 
-Start twice returns `INVALID_STATE`. Checkpoint 4.8 uses all six private
+Start twice returns `INVALID_STATE`. Verification step 4.8 uses all six private
 lifecycle states; null implementation represents uninitialized. Lifecycle
 calls are externally serialized. The worker mutex protects readiness and
 callback accounting. A lifecycle mutex protects state and active-submitter
@@ -354,7 +354,7 @@ temporary reference.
 
 The caller must keep an accepted Task alive until external coordination proves
 that its callback attempt has finished or that it remained unprocessed after
-an infrastructure failure. Phase 4 exposes no future or per-Task completion
+an infrastructure failure. Worker Pool and Scheduler Lifecycle exposes no future or per-Task completion
 handle. Tests can observe completion through test-owned callback state.
 
 The callback must not invalidate a Task before returning. Neither queue nor
@@ -606,31 +606,31 @@ All concurrent tests use test-owned mutexes, conditions, predicate loops,
 barriers, and fixed counts. They use no sleep, elapsed-time threshold, busy
 wait, forced termination, or private production hook.
 
-## 27. Checkpoint Implementation Plan
+## 27. Implementation sequence
 
-1. **Checkpoint 4.1:** approve this architecture only.
-2. **Checkpoint 4.2:** audit existing broadcast support and add backend
+1. **Verification step 4.1:** approve this architecture only.
+2. **Verification step 4.2:** audit existing broadcast support and add backend
    multiple-waiter and invalid-argument tests.
-3. **Checkpoint 4.3:** implemented private queue shutdown state, the idempotent
+3. **Verification step 4.3:** implemented private queue shutdown state, the idempotent
    public shutdown operation, shutdown-aware enqueue/dequeue/peek predicates,
    and focused deterministic wake-up and drain tests.
-4. **Checkpoint 4.4:** add deterministic queue shutdown concurrency tests and
+4. **Verification step 4.4:** add deterministic queue shutdown concurrency tests and
    complete a queue-level audit. This audit is now complete locally, including
    mixed producer-consumer drain and 32-Task exact-accounting stress coverage.
-5. **Checkpoint 4.5:** implemented scheduler public types, result mapping,
+5. **Verification step 4.5:** implemented scheduler public types, result mapping,
    failure-atomic initialization, inactive destruction, tests, and private
    layout without workers.
-6. **Checkpoint 4.6:** implemented fixed worker creation, stable contexts,
+6. **Verification step 4.6:** implemented fixed worker creation, stable contexts,
    readiness coordination, lifecycle transitions, partial-start rollback, and
    the then-required idle-worker cleanup without callback execution.
-7. **Checkpoint 4.7:** implemented submission gates, blocking and nonblocking
+7. **Verification step 4.7:** implemented submission gates, blocking and nonblocking
    submission, the dequeue/callback worker loop, callback accounting, and the
    temporary graceful running-destroy bridge.
-8. **Checkpoint 4.8:** implemented public graceful shutdown, active-submitter
+8. **Verification step 4.8:** implemented public graceful shutdown, active-submitter
    completion, public worker join, `STOPPED`, and strict destruction behavior.
-9. **Checkpoint 4.9:** completed deterministic worker-pool concurrency,
+9. **Verification step 4.9:** completed deterministic worker-pool concurrency,
    lifecycle, failure, stress, ownership, and release-readiness audits.
-10. **Checkpoint 4.10:** perform final Phase 4 repository validation, commit,
+10. **Verification step 4.10:** perform final Worker Pool and Scheduler Lifecycle repository validation, commit,
     and push.
 
 This sequence keeps backend validation, queue terminal behavior, scheduler
@@ -669,7 +669,7 @@ logging, and non-Windows backends.
 
 ## 30. Architecture Decision Summary
 
-Phase 4 adopts a caller-allocated scheduler with an opaque private
+Worker Pool and Scheduler Lifecycle adopts a caller-allocated scheduler with an opaque private
 implementation. It owns one shutdown-aware synchronized queue, fixed worker
 and context arrays, callback configuration, and lifecycle state. Tasks remain
 caller-owned.
@@ -689,9 +689,9 @@ supported and may race safely with shutdown through the lifecycle and queue
 mutexes. Scheduler restart is not supported. Completion observation and richer
 execution results remain future design work.
 
-## 31. Phase 4 Completion
+## 31. Architecture outcome
 
-**Phase 4 — Fixed Worker Pool and Scheduler Lifecycle**
+**Worker Pool and Scheduler Lifecycle — Fixed Worker Pool and Scheduler Lifecycle**
 
 Status: **Complete**
 
@@ -702,4 +702,4 @@ execution of every test target and the main regression, 3,000 scheduler-suite
 runs, 2,000 synchronized-queue-suite runs, 1,000 backend-suite runs, and the
 deterministic exact-accounting workloads described above. This closes
 lifecycle implementation; it does not claim production deployment readiness.
-Phase 5 is reserved for benchmarking and performance analysis.
+Performance Evaluation is reserved for benchmarking and performance analysis.

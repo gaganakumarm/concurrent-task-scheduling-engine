@@ -1,4 +1,4 @@
-# Phase 5 contention profiling and bottleneck analysis
+# Contention Profiling and Bottleneck Analysis
 
 ## 1. Executive conclusion
 
@@ -10,7 +10,7 @@ standard/partitioned comparisons.
 
 ## 2. Scope
 
-This checkpoint measures; it does not optimize. The public API, queue semantics,
+This verification step measures; it does not optimize. The public API, queue semantics,
 lock order, shutdown behavior, ownership model, and six-test topology remain
 unchanged.
 
@@ -189,7 +189,7 @@ Confidence is moderate for queue coordination being a material bottleneck in
 the measured minimal-work cases, high for the individual counters as measured,
 and low for extrapolation beyond this machine and matrix.
 
-## 33. Exact first Checkpoint 5.4 experiment
+## 33. Exact first Verification step 5.4 experiment
 
 Test exactly one optimization: replace per-dequeue `not_full` signaling with a
 semantics-preserving batched producer-notification experiment, while retaining
@@ -198,4 +198,4 @@ correctness tests. This is a proposal only; it is not implemented here.
 
 Raw evidence is under `results/profiling/raw`, the machine-readable aggregation
 is `results/profiling/profiling-summary.csv`, and the twelve generated SVGs are
-under `docs/images/phase-5-profiling`.
+under `docs/images/contention-profiling`.

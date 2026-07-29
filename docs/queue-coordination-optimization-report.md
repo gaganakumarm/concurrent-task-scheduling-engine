@@ -1,4 +1,4 @@
-# Phase 5 queue-coordination optimization report
+# Queue Coordination Optimization Study
 
 ## 1. Executive decision
 
@@ -6,9 +6,9 @@
 and selected no-op medians improved, but medium CPU regressed 5.79%, exceeding
 the mandatory 5% safeguard. The internal switch therefore defaults to `OFF`.
 
-## 2. Baseline evidence from Checkpoint 5.3
+## 2. Baseline contention evidence
 
-Checkpoint 5.3 directly measured queue waits, lock acquisition, signaling,
+Verification step 5.3 directly measured queue waits, lock acquisition, signaling,
 occupancy, and worker distribution. It supported shared queue coordination as
 the strongest scheduler-side bottleneck hypothesis for minimal callbacks.
 
@@ -147,7 +147,7 @@ CSVs are retained under `results/optimization/raw`.
 
 ## 23. Exact next recommendation
 
-Do not adopt or tune this signaling policy. The next checkpoint should first
+Do not adopt or tune this signaling policy. The next verification step should first
 repeat the medium safeguard and four-worker no-op A/B comparison on a quieter,
 controlled environment to determine whether the conflicting medians reproduce;
 it should not begin another optimization until that evidence is resolved.

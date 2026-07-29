@@ -1,8 +1,8 @@
-# Phase 6 runtime accounting and hybrid snapshot
+# Runtime Accounting and Scheduler Snapshots
 
 ## 1. Executive summary
 
-Checkpoint 6.2 implements a private, versioned scheduler snapshot with exact
+Verification step 6.2 implements a private, versioned scheduler snapshot with exact
 lifetime accounting, queue high-water tracking, checked saturation, and
 deterministic tests. It adds no public API and changes no Task, callback,
 queue, shutdown, or ownership semantics. Capture follows the approved hybrid
@@ -139,10 +139,11 @@ candidate Tasks/s (+3.06%; CV 13.19%/6.04%). Medium medians were 213,853 versus
 202,383 Tasks/s (-5.36%; CV 5.94%/6.08%). The medium difference is 0.36 points
 beyond the nominal safeguard but smaller than either run’s variability, so it
 is treated as noisy and not a demonstrated meaningful regression. No
-statistical significance is claimed. Phase 6.3 should retain an overhead gate.
+statistical significance is claimed. Invariant verification should retain an
+overhead gate.
 
-Checkpoint 6.3 consumes snapshots through the private pure model documented in
-[Phase 6 lifecycle invariant validation](phase-6-lifecycle-invariant-validation.md).
+Verification step 6.3 consumes snapshots through the private pure model documented in
+[Reliability and Observability lifecycle invariant validation](lifecycle-invariant-verification.md).
 Live hybrid snapshots use structural bounds; exact cross-domain balances remain
 quiescent-only.
 
@@ -171,7 +172,7 @@ wait totals, cancellation outcomes, public health model, reset operation, or
 fault injection. Counter saturation is detectable but makes later accounting
 incomplete.
 
-## 17. Checkpoint decision
+## 17. Decision
 
 The minimal private runtime-accounting and hybrid snapshot foundation is
 approved for continued internal validation. Public exposure and invariant

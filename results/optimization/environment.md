@@ -1,4 +1,4 @@
-# Checkpoint 5.4 environment
+# Queue coordination experiment environment
 
 - Baseline: `7e7e962f` (`main`, equal to `origin/main`)
 - OS: Windows NT 10.0.26200.0, AMD64

@@ -1,4 +1,4 @@
-"""Validate Phase 5 baseline CSV files and generate summary data and SVGs."""
+"""Validate Performance Evaluation baseline CSV files and generate summary data and SVGs."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RAW = ROOT / "results" / "baseline" / "raw"
 SUMMARY = ROOT / "results" / "baseline" / "baseline-summary.csv"
-CHARTS = ROOT / "docs" / "images" / "phase-5"
+CHARTS = ROOT / "docs" / "images" / "performance"
 
 EXPECTED_HEADER = [
     "timestamp_utc",

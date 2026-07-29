@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate Checkpoint 5.3 CSV evidence and generate summary/chart SVGs."""
+"""Validate Verification step 5.3 CSV evidence and generate summary/chart SVGs."""
 
 import csv
 import math
@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RAW = ROOT / "results" / "profiling" / "raw"
 SUMMARY = ROOT / "results" / "profiling" / "profiling-summary.csv"
-IMAGES = ROOT / "docs" / "images" / "phase-5-profiling"
+IMAGES = ROOT / "docs" / "images" / "contention-profiling"
 
 PROFILE_FILES = sorted(
     path for path in RAW.glob("*.csv")

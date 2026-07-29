@@ -1,18 +1,18 @@
-# Phase 5 performance engineering closure
+# Scheduler Performance Evaluation
 
 ## 1. Executive summary
 
-Phase 5 introduced reproducible benchmarking and compile-time-gated internal
+Performance Evaluation introduced reproducible benchmarking and compile-time-gated internal
 profiling. Minimal-work throughput did not scale positively with more workers
 around the current shared bounded queue, and direct measurements support queue
 coordination as a material tiny-Task bottleneck. Exact correctness accounting
 was investigated and was not the dominant explanation. Transition-aware
 signaling reduced signal count but failed the complete acceptance gate, so no
 optimization was promoted. Default scheduler behavior remains validated and
-unchanged. The phase improved evidence and engineering confidence even though
+unchanged. The work improved evidence and engineering confidence even though
 the experiment was rejected.
 
-## 2. Phase objective
+## 2. Objective
 
 Establish repeatable performance measurement, characterize the scheduler,
 measure internal contention, and evaluate one evidence-driven optimization
@@ -24,13 +24,13 @@ The work covers the Windows fixed-worker scheduler and shared bounded queue.
 It does not claim cross-platform performance, statistical significance,
 universal scalability, or completion of any alternative queue design.
 
-## 4. Checkpoint timeline
+## 4. Delivery timeline
 
 - 5.1 (`5b2a3cc`): benchmark architecture and deterministic harness.
 - 5.2 (`acbe548`): ordinary Release baseline measurements.
 - 5.3 (`7e7e962`): direct contention profiling and accounting comparison.
 - 5.4 (`d847fef`): controlled transition-signaling experiment and rollback.
-- 5.5: evidence audit, production validation, index, and phase closure.
+- 5.5: evidence audit, production verification, index, and summary.
 
 ## 5. Benchmark architecture
 
@@ -119,7 +119,7 @@ the main executable reports version 0.1.0 with initialized status.
 
 The [benchmark methodology](../benchmarks/README.md), committed environment
 records, raw CSVs, summaries, and charts preserve the evidence chain. Run
-[`scripts/reproduce_phase5.ps1`](../scripts/reproduce_phase5.ps1) for build and
+[`scripts/reproduce_performance_evaluation.ps1`](../scripts/reproduce_performance_evaluation.ps1) for build and
 self-test validation without regenerating historical matrices.
 
 ## 16. Portfolio interpretation
@@ -144,8 +144,8 @@ Reproduce the evidence on a quieter Windows environment and Linux before
 selecting another single-variable experiment. Any future queue, batching,
 affinity, or worker-selection study needs its own correctness and rollback gate.
 
-## 18. Phase closure decision
+## 18. Decision
 
-**PHASE 5 CLOSED.** Benchmarking, profiling, controlled experimentation,
+**PERFORMANCE EVALUATION COMPLETE.** Benchmarking, profiling, controlled experimentation,
 rollback, documentation, evidence retention, and default-production validation
-are complete. No Phase 6 work begins here.
+are complete. No Reliability and Observability work begins here.

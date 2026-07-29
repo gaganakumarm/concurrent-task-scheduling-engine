@@ -8,7 +8,8 @@ backend, and active synchronization boundary.
 ## Current Task Queue
 
 `TaskQueue` remains the fixed-capacity, non-thread-safe circular FIFO primitive
-implemented in Phase 2. Its public structure and operations are unchanged.
+implemented in the bounded queue foundation. Its public structure and
+operations are unchanged.
 Keeping it synchronization-free preserves its focused API, existing behavior,
 and direct use where external synchronization is appropriate.
 
@@ -48,7 +49,7 @@ The internal condition abstraction provides distinct signal and broadcast
 operations. The Windows backend implements them with
 `WakeConditionVariable` and `WakeAllConditionVariable`, respectively.
 Deterministic backend tests verify that one broadcast releases every waiter in
-a fixed set using a shared mutex-protected predicate. Checkpoint 4.3 now uses
+a fixed set using a shared mutex-protected predicate. Verification step 4.3 now uses
 that operation to broadcast both queue conditions during shutdown.
 
 ## Synchronized Wrapper Foundation
@@ -321,6 +322,6 @@ UCRT GCC 16.1.0 toolchain.
 
 ## Deferred Functionality
 
-This checkpoint does not implement blocking peek, timeout lifecycle APIs,
+This verification step does not implement blocking peek, timeout lifecycle APIs,
 cancellation, restart, or completion-result APIs. `TaskQueue` remains
 non-thread-safe.

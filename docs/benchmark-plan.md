@@ -1,10 +1,10 @@
-# Phase 5 benchmark plan
+# Scheduler Benchmark Plan
 
-## Goals and checkpoints
+## Goals and delivery sequence
 
-Phase 5 measures the completed scheduler without changing its semantics.
-Checkpoint 5.1 establishes the timer, deterministic harness, correctness gate,
-CLI, statistics, and raw CSV export. Checkpoint 5.2 captures a controlled
+Performance Evaluation measures the completed scheduler without changing its semantics.
+Verification step 5.1 establishes the timer, deterministic harness, correctness gate,
+CLI, statistics, and raw CSV export. Verification step 5.2 captures a controlled
 baseline and reports machine-specific observations. Later work may form and
 test one optimization hypothesis only after the optimization gate is met.
 
@@ -61,7 +61,7 @@ No production optimization may be introduced until:
 5. unchanged correctness tests pass; and
 6. the post-change benchmark uses the same methodology.
 
-Checkpoint 5.1 makes no performance claim and changes no scheduler, queue,
+Verification step 5.1 makes no performance claim and changes no scheduler, queue,
 callback, lifecycle, shutdown, join, ownership, or public API behavior.
 
 ## Threats to validity

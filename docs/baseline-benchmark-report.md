@@ -1,4 +1,4 @@
-# Phase 5 baseline benchmark report
+# Baseline Scheduler Benchmark Report
 
 ## 1. Executive summary
 
@@ -21,20 +21,20 @@ conclusions.
 ## 2. Scope
 
 The report measures worker, producer, queue-capacity, and deterministic
-callback-cost configurations using the validated Phase 5.1 harness. It also
+callback-cost configurations using the validated benchmark harness. It also
 records shutdown, join, submission, and end-to-end latency.
 
 ## 3. Non-goals
 
-This checkpoint does not optimize code, identify a confirmed root cause,
+This verification step does not optimize code, identify a confirmed root cause,
 measure worker utilization, compare other machines, or establish universal
 scalability.
 
 ## 4. Baseline commit
 
 All measurements use commit
-`5b2a3cc2253aaab81a9b5223a8a45e5026b4581c` on `main`. The Phase 4 stable tag
-remained on `35eef43`. The optional Phase 5.1 tag was not present.
+`5b2a3cc2253aaab81a9b5223a8a45e5026b4581c` on `main`. The Worker Pool and Scheduler Lifecycle stable tag
+remained on `35eef43`. The optional benchmark tag was not present.
 
 ## 5. Machine environment
 
@@ -54,7 +54,7 @@ completed without compiler warnings.
 
 Primary configurations used 100,000 Tasks, validated accounting, three
 warm-ups, and ten measured fresh scheduler lifecycles. No outlier was removed.
-Cross-iteration p50 and p95 use the Phase 5.1 nearest-rank definition.
+Cross-iteration p50 and p95 use the benchmark's nearest-rank definition.
 
 Summary latency columns explicitly contain medians of per-iteration
 percentiles. They are not presented as percentiles of one pooled Task-latency
@@ -97,9 +97,9 @@ were 20.36% slower than four by median throughput.
 Inference: this very small callback does not benefit from additional workers
 on this run; coordination and contention costs are not amortized.
 
-![No-op throughput](images/phase-5/noop-throughput-by-workers.svg)
-![No-op speedup](images/phase-5/noop-speedup-by-workers.svg)
-![No-op efficiency](images/phase-5/noop-efficiency-by-workers.svg)
+![No-op throughput](images/performance/noop-throughput-by-workers.svg)
+![No-op speedup](images/performance/noop-speedup-by-workers.svg)
+![No-op efficiency](images/performance/noop-efficiency-by-workers.svg)
 
 ## 11. Producer scaling results
 
@@ -117,7 +117,7 @@ Inference: additional producers did not materially improve aggregate throughput
 and increased submission contention. One producer had the lowest measured
 submission latency.
 
-![Producer throughput](images/phase-5/throughput-by-producers.svg)
+![Producer throughput](images/performance/throughput-by-producers.svg)
 
 ## 12. Queue-capacity results
 
@@ -136,8 +136,8 @@ Inference: capacity one demonstrates strong backpressure. Increasing capacity
 from 64 to 256 did not materially improve throughput and permitted more queue
 waiting in these measurements.
 
-![Capacity throughput](images/phase-5/throughput-by-capacity.svg)
-![Capacity submission latency](images/phase-5/submit-p95-by-capacity.svg)
+![Capacity throughput](images/performance/throughput-by-capacity.svg)
+![Capacity submission latency](images/performance/submit-p95-by-capacity.svg)
 
 ## 13. Callback-profile results
 
@@ -151,8 +151,8 @@ Observation: light CPU had the highest primary median throughput, 2.63% above
 no-op, but that difference is much smaller than the stability drift. Medium CPU
 had the highest end-to-end latency and 82.29% lower throughput than no-op.
 
-![Callback throughput](images/phase-5/throughput-by-callback-profile.svg)
-![Callback end-to-end latency](images/phase-5/e2e-p95-by-callback-profile.svg)
+![Callback throughput](images/performance/throughput-by-callback-profile.svg)
+![Callback end-to-end latency](images/performance/e2e-p95-by-callback-profile.svg)
 
 ## 14. Light CPU scaling results
 
@@ -169,7 +169,7 @@ Observation: light CPU achieved 1.060x speedup at four workers, compared with
 Inference: added callback work improved the observed four-worker scaling
 slightly, but not enough to overcome the demonstrated environmental variation.
 
-![Light CPU worker scaling](images/phase-5/light-throughput-by-workers.svg)
+![Light CPU worker scaling](images/performance/light-throughput-by-workers.svg)
 
 ## 15. Controlled backpressure result
 
@@ -204,7 +204,7 @@ Shutdown was a very small fraction of total duration. Join exceeded shutdown
 because it includes remaining drain and worker termination, but remained below
 0.15% of median total duration in these profile runs.
 
-![Shutdown and join](images/phase-5/shutdown-join-by-callback-profile.svg)
+![Shutdown and join](images/performance/shutdown-join-by-callback-profile.svg)
 
 ## 18. Key observations
 
@@ -264,7 +264,7 @@ for fine-grained optimization claims. Large effects—capacity-one backpressure,
 medium callback cost, and failure of eight-worker scaling—are visible. Small
 differences require a more controlled rerun.
 
-## 24. Recommendations for Checkpoint 5.3
+## 24. Recommendations for contention profiling
 
 Profile the no-op 1/4/8-worker configurations, capacity 1 versus 64, and medium
 CPU at four workers. Measure queue-lock wait, condition wake-ups, callback

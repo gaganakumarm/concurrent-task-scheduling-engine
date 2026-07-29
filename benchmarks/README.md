@@ -4,7 +4,7 @@
 
 `concurrent_scheduler_benchmarks` measures the completed fixed-worker
 scheduler with deterministic workloads. It is an explicit benchmark program,
-not a correctness CTest. This checkpoint establishes measurement machinery; it
+not a correctness CTest. This verification step establishes measurement machinery; it
 does not claim that one configuration is faster, identify a bottleneck, or
 justify production optimization.
 
@@ -180,12 +180,12 @@ reduce but do not eliminate these effects.
 Results describe only the measured machine and configuration. They do not
 establish universal scalability, worker utilization, causality when multiple
 variables change, or a production optimization opportunity. Memory usage and
-CPU time are not reported because this checkpoint has no validated portable
+CPU time are not reported because this verification step has no validated portable
 measurement mechanism for them.
 
 ## Contention profiling build
 
-Checkpoint 5.3 may configure a separate diagnostic build with
+Verification step 5.3 may configure a separate diagnostic build with
 `-DCONCURRENT_SCHEDULER_ENABLE_PROFILING=ON`. The option defaults to `OFF` and
 is scoped privately to the scheduler implementation and benchmark executable.
 Normal builds compile no profiling fields or profiling code, and the public API
@@ -207,7 +207,7 @@ its mean is event-sampled, not time-weighted. Cumulative lock and callback
 durations are concurrent thread-time, so ratios against wall time can exceed
 100% and must not be added as a wall-time decomposition.
 
-Checkpoint 5.4 retains the internal build switch
+Verification step 5.4 retains the internal build switch
 `CONCURRENT_SCHEDULER_USE_TRANSITION_SIGNALING`. It defaults to `OFF`, which
 preserves unconditional signaling. `ON` enables the rejected experimental
 policy: signal on empty/full boundary transitions or while corresponding

@@ -1,10 +1,10 @@
-# Phase 6 reliability and observability architecture
+# Reliability and Observability Architecture
 
 ## 1. Executive summary
 
-Phase 6 will add internal-first, data-race-safe runtime accounting,
+Reliability and Observability will add internal-first, data-race-safe runtime accounting,
 deterministic failure testing, and production-oriented reliability evidence
-without changing scheduler semantics. Checkpoint 6.1 is architecture only:
+without changing scheduler semantics. Verification step 6.1 is architecture only:
 runtime snapshots, fault injection, recovery, watchdogs, and new public APIs
 are not implemented. The selected snapshot model is hybrid: each existing
 synchronization domain is read consistently, locks are never nested, and the
@@ -103,7 +103,7 @@ long-duration harness, or resource-leak observation protocol.
 | R09 | Callback corrupts shared context | Application corruption | Caller owns synchronization | Cannot detect generically | Critical | Medium | Contract and application tests | 6.7 |
 | R10 | Queue saturation | Producer blocking/latency | Bounded blocking and try-submit | No production wait/high-water data | Medium | High | Queue accounting | 6.2 |
 | R11 | Producer starvation | Unbounded submission delay | Condition signaling and stress tests | No per-producer production data | High | Low | Reliability stress diagnostics | 6.6 |
-| R12 | Worker starvation | Reduced progress | Phase 5 distribution evidence | No runtime per-worker health | High | Low | Active/per-worker optional data | 6.2, 6.6 |
+| R12 | Worker starvation | Reduced progress | Performance Evaluation distribution evidence | No runtime per-worker health | High | Low | Active/per-worker optional data | 6.2, 6.6 |
 | R13 | Missed wake-up | Deadlock | Predicate loops and concurrency tests | No wait-state snapshot | Critical | Low | Stress/fault timeout dump | 6.6–6.7 |
 | R14 | Premature worker exit | Reduced or stopped drain | Worker result checked at join | Not visible until join | Critical | Low | Active-worker accounting/health | 6.2–6.3 |
 | R15 | Incomplete draining | Lost accepted Task | Shutdown drain tests | No accepted balance snapshot | Critical | Low | Accounting invariant | 6.2–6.3 |
@@ -114,7 +114,7 @@ long-duration harness, or resource-leak observation protocol.
 | R20 | Native join failure | Live handle/resource uncertainty | Error returned; handle retained | Which worker failed hidden | Critical | Low | Per-worker join result | 6.2, 6.5 |
 | R21 | Counter overflow | Invalid diagnostics | No current checked production counters | Undetected | Medium | Low | Saturation plus overflow flag | 6.2 |
 | R22 | Snapshot data race | Undefined behavior | Snapshot does not yet exist | Entire surface absent | Critical | Medium if naïve | Existing-lock hybrid design | 6.2 |
-| R23 | Instrumentation changes semantics | Regression/deadlock | Profiling default off; Phase 5 gates | Production accounting not proven | High | Medium | Lock-order review and rollback gate | 6.2 |
+| R23 | Instrumentation changes semantics | Regression/deadlock | Profiling default off; Performance Evaluation gates | Production accounting not proven | High | Medium | Lock-order review and rollback gate | 6.2 |
 | R24 | Snapshot during transition | Contradictory totals | External lifecycle serialization only | No consistency contract | High | Medium | Domain-consistent snapshot metadata | 6.2–6.3 |
 | R25 | Synchronization operation failure | Worker/queue failure | Returned `SYSTEM_ERROR`, queue shutdown | Primitive/location collapsed | Critical | Low | Failure category and injection | 6.4–6.5 |
 
@@ -123,7 +123,7 @@ production incidents.
 
 ## 7. Observability requirements
 
-Required Phase 6 data is minimal and semantic: lifecycle, gate status, worker
+Required Reliability and Observability data is minimal and semantic: lifecycle, gate status, worker
 counts, exact submission/callback balance, queue size/capacity/high-water mark,
 and categorized failures. Optional timing must wait until a clock and overhead
 contract exists. Benchmark profiling remains separate.
@@ -145,7 +145,7 @@ contract exists. Benchmark profiling remains separate.
 | uptime/callback/shutdown timing | Optional | `uint64_t` ns | future clock boundary | To be designed | Checked/saturating | Internal, lifetime | Potentially material |
 | profiling lock/wait detail | Benchmark-only | existing profile types | profiling build | queue mutex/post-join | Existing checks | Private, per lifetime | Default zero |
 
-Accepted counters are not user-resettable in Phase 6; a new initialized
+Accepted counters are not user-resettable in Reliability and Observability; a new initialized
 scheduler creates a new lifetime. Reset during execution would break invariants.
 
 ## 8. Runtime snapshot model
@@ -158,7 +158,7 @@ and consistency metadata. It should not contain Task pointers, callback context,
 native handles, wall-clock timestamps, cancellation counts, or profiling-only
 timings.
 
-Phase 6.2 should first expose the snapshot only to internal tests through a
+Runtime accounting should first expose the snapshot only to internal tests through a
 private header guarded against ordinary public inclusion. Snapshot formatting
 belongs in the reliability test/application layer.
 
@@ -180,7 +180,7 @@ one domain at a time. Derived cross-domain invariants are classified as:
 - advisory live invariants, reported as indeterminate if skew can explain them.
 
 A sequence value before/after each domain may later identify concurrent
-mutation, but Phase 6.2 must not spin until a globally atomic view appears.
+mutation, but snapshot collection must not spin until a globally atomic view appears.
 
 ## 10. Health model
 
@@ -202,7 +202,7 @@ soak evidence and an explicit configuration/clock contract.
 
 | Invariant | Status |
 |---|---|
-| `submitted = accepted + rejected` after each submit call is classified | Requires Phase 6 counters |
+| `submitted = accepted + rejected` after each submit call is classified | Requires Reliability and Observability counters |
 | `accepted = queued + running + completed + failed` | Quiescent/exact after consistent accounting; advisory live |
 | `running <= configured workers` | Required and live-testable |
 | `queue size <= capacity` | Already structurally enforced and tested |
@@ -248,11 +248,11 @@ means failure. The scheduler counts both privately and continues processing.
 It does not expose the callback code, change `TaskState`, retry, cancel, or
 retain a per-Task result.
 
-Phase 6 should first expose aggregate success/failure in an internal snapshot.
+Reliability and Observability should first expose aggregate success/failure in an internal snapshot.
 Future compatible options include a separate extended callback API, a
 caller-managed result in application context, or an optional completion
 observer. Changing the existing callback signature or silently changing Task
-state would break compatibility and is rejected for this phase.
+state would break compatibility and is rejected for this design.
 
 ## 14. Fault-injection architecture
 
@@ -273,7 +273,7 @@ and Nth-call triggers, never global mutable state.
 
 The hook boundary must be immediately adjacent to the real operation, have one
 documented evaluation per call, and be excluded from production compilation.
-No fault injection is implemented in Checkpoint 6.1.
+No fault injection is implemented in Verification step 6.1.
 
 ## 15. Stress and soak strategy
 
@@ -317,13 +317,13 @@ reentrancy and ownership analysis and is not selected here.
 
 ## 17. Public API compatibility
 
-Runtime observation is internal/test-only through Phase 6.3. This permits
+Runtime observation remains internal and test-only. This permits
 schema iteration and overhead validation without ABI commitment. After
 reliability evidence, a future optional diagnostic API may copy a
 versioned, fixed-width public snapshot into caller storage. It must not expose
 private enums, locks, pointers, native handles, or reset live counters.
 
-Checkpoint 6.1 changes no public header or behavior.
+Verification step 6.1 changes no public header or behavior.
 
 ## 18. Security and misuse considerations
 
@@ -336,16 +336,16 @@ buffers and stable enum-name fallbacks.
 
 ## 19. Performance overhead considerations
 
-Phase 6.2 must measure default production accounting overhead against the Phase
-5 ordinary benchmark. Counters should reuse existing locks, add no I/O, avoid
+The runtime-accounting work must measure default production overhead against
+the ordinary performance baseline. Counters should reuse existing locks, add no I/O, avoid
 per-Task allocation and timestamps, and use checked constant-time increments.
 Snapshot reads are on demand. Acceptance requires unchanged lock order and no
 material regression under a predeclared threshold; otherwise accounting is
 reduced or compiled behind a default-off diagnostic option.
 
-## 20. Phase 6 checkpoint roadmap
+## 20. Reliability delivery roadmap
 
-| Checkpoint | Objective and code scope | Tests/docs | Non-goals | Acceptance / rollback |
+| Verification step | Objective and code scope | Tests/docs | Non-goals | Acceptance / rollback |
 |---|---|---|---|---|
 | 6.1 | Architecture only | Audit, ADR, risk/roadmap | Runtime features | Docs complete, six tests; rollback docs if unsupported |
 | 6.2 | Private counters and hybrid snapshot | Unit/live/quiescent snapshot tests; schema doc | Public API/timing | Race-free, lock order and overhead pass; remove counters if semantics regress |
@@ -354,9 +354,9 @@ reduced or compiled behind a default-off diagnostic option.
 | 6.5 | Partial-init/failure-path testing | Allocation/sync/thread/join cases; cleanup report | Random chaos | Exact cleanup/ownership; rollback unsafe injection point |
 | 6.6 | Reliability stress/soak executable | CI subset, seeded stress, manual soak guide | Performance optimization | Exact balances/no timeout/leak trend; quarantine flaky scenario with evidence |
 | 6.7 | Diagnostic formatter and reliability report | Golden deterministic dumps, misuse tests | Logging framework/telemetry service | Bounded quiet library surface; rollback noisy or unsafe output |
-| 6.8 | Phase closure | Full reproduction, evidence index, closure report | New features | All reliability gates and defaults pass; do not close with unresolved correctness defect |
+| 6.8 | Evidence summary | Full reproduction, evidence index, final report | New features | All reliability gates and defaults pass; do not publish with an unresolved correctness defect |
 
-Each checkpoint preserves public compatibility unless separately approved,
+Each verification step preserves public compatibility unless separately approved,
 documents its code and test scope, and introduces only one dependency layer.
 
 ## 21. Acceptance criteria
@@ -368,7 +368,7 @@ inactive fault boundaries, bounded stress/soak plan, internal-first API choice,
 unchanged production behavior, six passing CTests, valid links, and clean
 repository hygiene.
 
-Future implementation checkpoints additionally require data-race analysis,
+Future implementation verification steps additionally require data-race analysis,
 failure cleanup oracles, overhead measurement, and rollback thresholds before
 their code is retained.
 
@@ -385,31 +385,31 @@ Proceed with internal-first, lifetime-scoped observability using existing
 synchronization domains and a hybrid domain-consistent snapshot. Keep the
 library quiet, preserve the public API, compile future deterministic
 per-instance fault injection only when explicitly enabled, and separate
-reliability validation from performance benchmarks. Checkpoint 6.2 may
+reliability validation from performance benchmarks. Verification step 6.2 may
 implement only the minimal required counters and private snapshot after a
 lock-order and overhead review.
 
-Checkpoint 6.2 implementation note: snapshot version 1 now implements the
+Verification step 6.2 implementation note: snapshot version 1 now implements the
 hybrid lifecycle → worker/per-worker-atomic → queue capture order. Callback
 outcomes use cache-line-aligned, lock-free, single-writer C17 atomic slots to
 avoid a new callback mutex acquisition. The interface remains private; health
 thresholds, invariant enforcement, and fault injection remain unimplemented.
 
-Checkpoint 6.3 implementation note: private validation separates live-safe
+Verification step 6.3 implementation note: private validation separates live-safe
 structural bounds from quiescent accounting identities. Overflow makes
 accounting validation incomplete while structural checks continue. Health is
 derived, and fixed-buffer diagnostics are explicit, deterministic,
 allocation-free, and silent. No validator call is present in a scheduler
 execution path.
 
-Checkpoint 6.4 implementation note: deterministic fault plans are private,
+Verification step 6.4 implementation note: deterministic fault plans are private,
 per-scheduler, and compiled only when the default-OFF fault-injection option is
 enabled. Initial seams cover worker-array allocation, worker creation, and
 post-native-join result rejection. Disabled builds contain no plan storage or
 fault checks, and worker-startup injection remains deferred because readiness
 arrival order is scheduling-dependent.
 
-Checkpoint 6.5 implementation note: the existing fault seams now validate
+Verification step 6.5 implementation note: the existing fault seams now validate
 partial-start join cleanup, allocation-failure retry, invalid lifecycle
 sequences, idempotent shutdown/join/destroy, post-destroy behavior, and wrapper
 reuse. No production code or fault point was added. Snapshot invariants,

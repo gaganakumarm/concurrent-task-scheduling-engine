@@ -1,20 +1,20 @@
-# Phase 7.1 performance, scalability, and stability validation
+# Scheduler Scalability and Stability
 
 ## 1. Executive summary
 
-Phase 7.1 measured the unchanged scheduler implementation at baseline commit
+Scalability and Stability measured the unchanged scheduler implementation at baseline commit
 `08a745c` on one Windows laptop. All recorded runs passed exact post-join
 runtime-accounting and lifecycle validation. No overflow, rejection, callback
 failure, cleanup failure, hang, or crash was observed.
 
-The results confirm the Phase 5 conclusion: the shared bounded queue is a
+The results confirm the Performance Evaluation conclusion: the shared bounded queue is a
 material bottleneck for tiny tasks. CPU workloads scale usefully through the
 four physical cores and continue to benefit at eight logical processors.
 No-op work peaks much earlier. No optimization was introduced.
 
 ## 2. Scope
 
-This checkpoint covers worker, producer, capacity, task-volume, callback-cost,
+This verification step covers worker, producer, capacity, task-volume, callback-cost,
 contention, sustained-load, lifecycle-stress, and historical-regression
 measurements. Results describe only the configurations and system below.
 
@@ -26,9 +26,9 @@ benchmark-specific production shortcut in this change.
 
 ## 4. Baseline commit
 
-The audited Phase 7.1 baseline is `08a745c` (`complete scheduler reliability
+The audited Scalability and Stability baseline is `08a745c` (`complete scheduler reliability
 validation`) on `main`, equal to `origin/main`. The tree was initially clean.
-The Phase 5 tag `v0.5-performance-engineering` resolves to `0527b6d`.
+The Performance Evaluation tag `v0.5-performance-engineering` resolves to `0527b6d`.
 
 ## 5. Hardware and software environment
 
@@ -60,8 +60,8 @@ Every measured iteration initializes, starts, submits, shuts down, joins,
 captures a snapshot, validates quiescence and STOPPED health, then destroys the
 scheduler. Snapshot capture is after the measured interval.
 
-The Phase 5 CSV is preserved. Phase 7 uses an append-only schema extension,
-identified here as the Phase 7.1 schema, adding snapshot version/consistency,
+The Performance Evaluation CSV is preserved. Scalability and Stability uses an append-only schema extension,
+identified here as the Scalability and Stability schema, adding snapshot version/consistency,
 all scheduler accounting counters, queue depth/high-water, validation outcome,
 and derived health after `correctness_passed`.
 
@@ -74,7 +74,7 @@ and derived health after `correctness_passed`.
 | `medium_cpu` | 4,096 integer mixing operations |
 | `heavy_cpu` | 65,536 integer mixing operations |
 
-The first three retain their Phase 5 semantics. `heavy_cpu` is new and uses the
+The first three retain their Performance Evaluation semantics. `heavy_cpu` is new and uses the
 same deterministic, allocation-free, I/O-free mixing function. Exact aggregate
 checksum validation prevents removal of callback work.
 
@@ -205,14 +205,14 @@ accounting. Thus profiling overhead and benchmark accounting must not be
 mistaken for production wait duration.
 
 Every case emitted one not-empty and one not-full signal per task because
-transition signaling remained OFF. The Phase 5 conclusion remains valid:
+transition signaling remained OFF. The Performance Evaluation conclusion remains valid:
 shared queue coordination dominates tiny work and producer pressure increases
 contention. CPU work amortizes coordination. The previously rejected signaling
 experiment was not re-enabled.
 
 ## 15. Historical regression comparison
 
-The tagged Phase 5 build (`0527b6d`) and current baseline production code were
+The tagged Performance Evaluation build (`0527b6d`) and current baseline production code were
 built Release on the same machine. Runs alternated baseline then candidate in
 five pairs of three recorded samples, with a warm-up in each invocation: 15
 samples per build/workload, four workers/producers, capacity 64, 100,000 no-op
@@ -220,17 +220,17 @@ or 20,000 medium tasks.
 
 | Workload | Build | Median | Min | Max | CV | Candidate difference |
 |---|---|---:|---:|---:|---:|---:|
-| No-op | Phase 5 | 1,291,322 | 1,149,252 | 1,433,143 | 5.53% | — |
+| No-op | Performance Evaluation | 1,291,322 | 1,149,252 | 1,433,143 | 5.53% | — |
 | No-op | Current | 1,210,131 | 1,177,472 | 1,509,427 | 8.40% | -6.29% |
-| Medium | Phase 5 | 218,187 | 172,015 | 255,200 | 10.48% | — |
+| Medium | Performance Evaluation | 218,187 | 172,015 | 255,200 | 10.48% | — |
 | Medium | Current | 226,787 | 199,995 | 247,922 | 5.27% | +3.94% |
 
 Because the no-op gap crossed 5% but ranges overlapped, a fresh alternating
-15-sample reproduction was required. It measured Phase 5 at 1,281,159 median
+15-sample reproduction was required. It measured Performance Evaluation at 1,281,159 median
 (1,093,842--1,473,312, CV 7.04%) and current at 1,254,765
 (1,122,725--1,476,115, CV 8.73%), a -2.06% gap. Therefore the greater-than-5%
-gap was not repeatable. The latest pre-Phase-7 commit is the current baseline
-itself; Phase 7 changes only benchmark code and captures snapshots after the
+gap was not repeatable. The latest pre-scalability commit is the current baseline
+itself; Scalability and Stability changes only benchmark code and captures snapshots after the
 timed interval. No repeatable regression above 5% is established.
 
 ## 16. Correctness validation
@@ -261,9 +261,9 @@ Capacity below eight is restrictive; capacity above 64 gives little benefit.
 ## 19. Optimization decisions
 
 No production optimization was made. Evidence continues to support queue
-coordination as a possible future investigation, but Phase 5 already showed
+coordination as a possible future investigation, but Performance Evaluation already showed
 that reducing signals can harm medium work. Any new candidate requires its own
-controlled checkpoint and workload safeguards.
+controlled verification step and workload safeguards.
 
 ## 20. Known limitations
 
@@ -289,13 +289,13 @@ requires `-DCONCURRENT_SCHEDULER_ENABLE_PROFILING=ON`.
 
 ## 22. Acceptance result
 
-All 32 checkpoint acceptance criteria passed. Normal, fault-enabled, and
+All 32 verification step acceptance criteria passed. Normal, fault-enabled, and
 profiling builds/tests pass; the matrices and stress cases completed; exact
 accounting remained valid; no repeatable regression above 5% was found; public
 headers and production scheduler code are unchanged; raw data is ignored.
 
-## 23. Phase 7.2 readiness
+## 23. Robustness and Static Analysis readiness
 
-Phase 7.1 is ready for review. Phase 7.2 has not started. The recommended next
+Scalability and Stability is ready for review. Robustness and Static Analysis has not started. The recommended next
 step is to preserve this evidence as the performance baseline and scope any
 future queue-coordination experiment separately.

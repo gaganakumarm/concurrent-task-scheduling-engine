@@ -1,8 +1,8 @@
-# Phase 7.2 robustness, static-analysis, and undefined-behavior audit
+# Robustness and Static Analysis
 
 ## 1. Executive summary
 
-Phase 7.2 audited the scheduler at commit `a896aa6`. GCC 16.1's static analyzer
+Robustness and Static Analysis audited the scheduler at commit `a896aa6`. GCC 16.1's static analyzer
 completed a whole-project build without a finding. Normal, fault-enabled,
 profiling, and combined-feature configurations all passed. A strict warning
 build produced only reviewed diagnostics from deliberately grouped enum
@@ -20,12 +20,12 @@ found no verified defect requiring a production change.
 The review covered public and internal headers, task and queue implementations,
 the Windows synchronization backend, scheduler workers and lifecycle,
 accounting and validation, fault injection, profiling, benchmarks, tests,
-CMake warning configuration, Phase 6 reliability documents, the Phase 7.1
+CMake warning configuration, Reliability and Observability reliability documents, the Scalability and Stability
 report, and ADR-006.
 
 ## 3. Non-goals
 
-This checkpoint adds no feature, scheduling redesign, recovery mechanism,
+This verification step adds no feature, scheduling redesign, recovery mechanism,
 optimization, public diagnostic control, portability claim, or style-only
 refactor. Tests and production semantics are unchanged.
 
@@ -33,7 +33,7 @@ refactor. Tests and production semantics are unchanged.
 
 The initial tree was clean on `main`. `HEAD` and `origin/main` were
 `a896aa61ac0c5f69f3b3c927a4676c71dd0c8c22`
-(`validate scheduler scalability and stability`). Phase 7.1 was committed and
+(`validate scheduler scalability and stability`). Scalability and Stability was committed and
 pushed. `v0.5-performance-engineering` was present.
 
 ## 5. Environment
@@ -336,14 +336,14 @@ environment responsibilities.
 ## 24. Reproduction instructions
 
 Run the normal, fault, profiling, and combined CMake commands from this
-repository's root as listed in the checkpoint. GCC analysis can be reproduced
+repository's root as listed in the verification step. GCC analysis can be reproduced
 without changing project files:
 
 ```powershell
-cmake -S . -B build-phase-7-2-analyzer -G "MinGW Makefiles" `
+cmake -S . -B build-static-analyzer -G "MinGW Makefiles" `
   -DCMAKE_BUILD_TYPE=Debug `
   -DCMAKE_C_FLAGS="-Wall -Wextra -Wpedantic -fanalyzer"
-cmake --build build-phase-7-2-analyzer
+cmake --build build-static-analyzer
 ```
 
 The strict warning flags are listed in section 7. Sanitizer attempts use the
@@ -358,8 +358,8 @@ The GCC analyzer was clean; unavailable tools are reported accurately; the
 manual race, locking, ownership, arithmetic, lifecycle, error, assertion, and
 platform audits are complete. No public or hot-path change occurred.
 
-## 26. Phase 7.3 readiness
+## 26. Release preparation readiness
 
-Phase 7.2 is ready for architectural review. Phase 7.3 has not begun. Future
+Robustness and Static Analysis is ready for architectural review. Release preparation has not begun. Future
 dynamic-sanitizer work should use a compatible pre-existing environment or a
-separately approved toolchain checkpoint.
+separately approved toolchain verification step.

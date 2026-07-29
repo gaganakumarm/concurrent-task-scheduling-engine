@@ -1,8 +1,8 @@
-# Phase 6 deterministic fault injection
+# Deterministic Scheduler Fault Injection
 
 ## 1. Executive summary
 
-Checkpoint 6.4 implements a private deterministic fault-injection framework
+Verification step 6.4 implements a private deterministic fault-injection framework
 for scheduler failure-path tests. It is compiled only when
 `CONCURRENT_SCHEDULER_ENABLE_FAULT_INJECTION=ON`, which is not the default.
 
@@ -131,9 +131,9 @@ snapshot validation; and health derivation are covered. Full normal,
 benchmark, and profiling builds pass with fault injection OFF. The optional
 combined profiling and fault build also passes 8/8. Symbol and generated-build
 audits find no fault implementation or reference in the normal core. Final
-hygiene results are recorded in the checkpoint report.
+hygiene results are recorded in the verification step report.
 
-## 20. Checkpoint decision
+## 20. Decision
 
 All functional, compatibility, compile-out, and documentation gates support
 approval, subject to the final repository hygiene report.

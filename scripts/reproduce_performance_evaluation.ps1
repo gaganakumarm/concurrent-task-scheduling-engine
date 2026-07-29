@@ -51,8 +51,8 @@ try {
             --self-test
     }
 
-    Write-Host "PHASE 5 REPRODUCTION VALIDATION PASSED"
+    Write-Host "PERFORMANCE REPRODUCTION PASSED"
 } catch {
-    Write-Error "PHASE 5 REPRODUCTION VALIDATION FAILED: $_"
+    Write-Error "PERFORMANCE REPRODUCTION FAILED: $_"
     exit 1
 }
