@@ -330,7 +330,3 @@ lifecycle contracts.
 Any extension should retain graceful draining, deterministic cleanup,
 correctness-gated benchmarks, and the explicit rollback criteria used by the
 current performance evaluation.
-
-## License
-
-This project is licensed under the [MIT License](LICENSE).
