@@ -60,6 +60,25 @@ variables, and `_beginthreadex`.
 Task priorities are metadata; scheduling remains FIFO. Scheduler-level
 cancellation is not part of the public API.
 
+## Software Architecture
+
+![Concurrent Task Scheduling Engine architecture](docs/diagrams/concurrent-task-scheduling-engine-software-architecture.svg)
+
+## Quick Start
+
+```powershell
+cmake -S . -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+The current synchronization backend requires Windows. After the tests pass,
+run the example executable with:
+
+```powershell
+.\build\concurrent-task-scheduling-engine.exe
+```
+
 ## Repository Structure
 
 ### Folder Preview
@@ -67,7 +86,6 @@ cancellation is not part of the public API.
 ```text
 concurrent-task-scheduling-engine/
 ├── CMakeLists.txt                 Build configuration
-├── LICENSE                        MIT License
 ├── README.md                      Project documentation
 │
 ├── include/
@@ -92,30 +110,9 @@ concurrent-task-scheduling-engine/
 └── cmake/                         CMake package configuration
 ```
 
-Build directories are generated locally and are not part of the source
-architecture.
-
-| Path | Purpose |
-|---|---|
-| `include/concurrent_scheduler/` | Installed public API |
-| `src/` | Core task, queue, scheduler, and validation implementation |
-| `src/internal/` | Private observability, profiling, and fault-injection interfaces |
-| `src/platform/windows/` | Windows synchronization backend |
-| `tests/` | Deterministic test executables |
-| `benchmarks/` | Benchmark harness and Windows timer |
-| `results/` | Recorded baseline, profiling, optimization, and stability evidence |
-| `scripts/` | Reproduction and report-asset generation scripts |
-| `tools/` | Standalone benchmark analysis utility |
-| `docs/` | Architecture, reliability, performance, and release documentation |
-| `cmake/` | Installed-package configuration template |
-
-## Demo
+## Validation Evidence
 
 The following run uses Windows, C17, CMake, and the MinGW Makefiles generator.
-
-### Software Architecture
-
-![Concurrent Task Scheduling Engine architecture](docs/diagrams/concurrent-task-scheduling-engine-software-architecture.svg)
 
 ### Successful build
 
