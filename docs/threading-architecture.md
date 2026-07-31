@@ -203,7 +203,9 @@ public active-operation counter.
 Destroying an inactive shutdown queue with undrained pointers releases only
 queue-owned pointer storage and synchronization resources. It never frees the
 caller-owned Tasks. Direct users remain responsible for accounting for those
-Tasks; the future scheduler design is expected to drain before destruction.
+Tasks. The implemented `Scheduler` avoids this condition through its required
+shutdown-and-join sequence, which drains accepted Tasks before scheduler-owned
+queue destruction.
 
 | Resource | Owner | Lifetime | Release restriction |
 |---|---|---|---|

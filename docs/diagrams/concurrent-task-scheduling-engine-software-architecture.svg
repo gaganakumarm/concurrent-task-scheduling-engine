@@ -1,0 +1,203 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     viewBox="0 0 1600 1080"
+     role="img"
+     aria-labelledby="title desc">
+  <title id="title">Concurrent Task Scheduling Engine Software Architecture</title>
+  <desc id="desc">
+    Black-and-white layered software architecture showing the client application,
+    public C17 API, scheduler core, concurrent bounded FIFO, fixed worker pool,
+    caller callback, platform synchronization abstraction, Windows backend,
+    caller ownership, and private diagnostics.
+  </desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5"
+            markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M0 0 L10 5 L0 10 Z" fill="#000000"/>
+    </marker>
+    <style>
+      .page-title { font: 700 30px Arial, Helvetica, sans-serif; fill: #000000; }
+      .page-subtitle { font: 700 15px Arial, Helvetica, sans-serif; fill: #000000; letter-spacing: 1.4px; }
+      .layer-title { font: 700 17px Arial, Helvetica, sans-serif; fill: #000000; }
+      .component-title { font: 700 14px Arial, Helvetica, sans-serif; fill: #000000; }
+      .text { font: 12px Arial, Helvetica, sans-serif; fill: #000000; }
+      .small { font: 11px Arial, Helvetica, sans-serif; fill: #000000; }
+      .primary { fill: #ffffff; stroke: #000000; stroke-width: 1.8; }
+      .internal { fill: #ffffff; stroke: #000000; stroke-width: 1.6; stroke-dasharray: 8 6; }
+      .divider { stroke: #000000; stroke-width: 1.1; }
+      .flow { stroke: #000000; stroke-width: 1.8; fill: none; marker-end: url(#arrow); }
+      .support { stroke: #000000; stroke-width: 1.5; fill: none; stroke-dasharray: 8 6; marker-end: url(#arrow); }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="1600" height="1080" fill="#ffffff"/>
+
+  <text x="800" y="42" text-anchor="middle" class="page-title">
+    CONCURRENT TASK SCHEDULING ENGINE
+  </text>
+  <text x="800" y="70" text-anchor="middle" class="page-subtitle">
+    SOFTWARE ARCHITECTURE
+  </text>
+
+  <!-- Caller ownership -->
+  <rect x="40" y="120" width="220" height="195" rx="5" class="internal"/>
+  <text x="150" y="148" text-anchor="middle" class="component-title">CALLER OWNERSHIP</text>
+  <line x1="60" y1="164" x2="240" y2="164" class="divider"/>
+  <text x="62" y="192" class="text">• Task objects</text>
+  <text x="62" y="217" class="text">• Callback function</text>
+  <text x="62" y="242" class="text">• Callback context</text>
+  <text x="62" y="267" class="text">• Application data</text>
+  <text x="62" y="297" class="small">Resources remain valid until</text>
+  <text x="62" y="313" class="small">completion or successful join.</text>
+
+  <!-- Client application -->
+  <rect x="405" y="110" width="790" height="95" rx="5" class="primary"/>
+  <text x="800" y="142" text-anchor="middle" class="layer-title">CLIENT APPLICATION</text>
+  <line x1="435" y1="158" x2="1165" y2="158" class="divider"/>
+  <text x="800" y="183" text-anchor="middle" class="text">
+    Creates tasks • configures callback • starts scheduler • submits work • shuts down and joins
+  </text>
+
+  <!-- Public API -->
+  <line x1="800" y1="205" x2="800" y2="245" class="flow"/>
+  <text x="818" y="231" class="small">API calls</text>
+
+  <rect x="355" y="245" width="890" height="125" rx="5" class="primary"/>
+  <text x="800" y="276" text-anchor="middle" class="layer-title">PUBLIC C17 API</text>
+  <line x1="385" y1="292" x2="1215" y2="292" class="divider"/>
+
+  <rect x="390" y="310" width="185" height="40" rx="3" class="primary"/>
+  <text x="482" y="335" text-anchor="middle" class="component-title">Task API</text>
+
+  <rect x="590" y="310" width="185" height="40" rx="3" class="primary"/>
+  <text x="682" y="335" text-anchor="middle" class="component-title">Queue APIs</text>
+
+  <rect x="790" y="310" width="185" height="40" rx="3" class="primary"/>
+  <text x="882" y="335" text-anchor="middle" class="component-title">Scheduler API</text>
+
+  <rect x="990" y="310" width="185" height="40" rx="3" class="primary"/>
+  <text x="1082" y="335" text-anchor="middle" class="component-title">Version API</text>
+
+  <text x="800" y="365" text-anchor="middle" class="small">
+    Installed headers expose no native Windows synchronization types.
+  </text>
+
+  <!-- Core -->
+  <line x1="800" y1="370" x2="800" y2="410" class="flow"/>
+
+  <rect x="300" y="410" width="1000" height="390" rx="5" class="primary"/>
+  <text x="800" y="444" text-anchor="middle" class="layer-title">SCHEDULER CORE</text>
+  <line x1="330" y1="462" x2="1270" y2="462" class="divider"/>
+
+  <!-- Core top row -->
+  <rect x="345" y="490" width="250" height="115" rx="4" class="primary"/>
+  <text x="470" y="518" text-anchor="middle" class="component-title">LIFECYCLE CONTROL</text>
+  <line x1="365" y1="534" x2="575" y2="534" class="divider"/>
+  <text x="365" y="558" class="text">Init • start • shutdown</text>
+  <text x="365" y="580" class="text">Join • destroy • state validation</text>
+
+  <rect x="675" y="490" width="250" height="115" rx="4" class="primary"/>
+  <text x="800" y="518" text-anchor="middle" class="component-title">SUBMISSION GATE</text>
+  <line x1="695" y1="534" x2="905" y2="534" class="divider"/>
+  <text x="695" y="558" class="text">Accept only while RUNNING</text>
+  <text x="695" y="580" class="text">Track active submitters</text>
+
+  <rect x="1005" y="490" width="250" height="115" rx="4" class="internal"/>
+  <text x="1130" y="518" text-anchor="middle" class="component-title">RUNTIME ACCOUNTING</text>
+  <line x1="1025" y1="534" x2="1235" y2="534" class="divider"/>
+  <text x="1025" y="558" class="text">Submitted • accepted • rejected</text>
+  <text x="1025" y="580" class="text">Dequeued • callback outcomes</text>
+
+  <!-- Control relations -->
+  <line x1="595" y1="548" x2="675" y2="548" class="flow"/>
+  <text x="635" y="538" text-anchor="middle" class="small">state</text>
+
+  <!-- Core bottom row -->
+  <rect x="345" y="650" width="250" height="115" rx="4" class="primary"/>
+  <text x="470" y="678" text-anchor="middle" class="component-title">TASK MODEL</text>
+  <line x1="365" y1="694" x2="575" y2="694" class="divider"/>
+  <text x="365" y="718" class="text">Caller-owned Task</text>
+  <text x="365" y="740" class="text">ID • state • priority • work</text>
+
+  <rect x="675" y="635" width="250" height="145" rx="4" class="primary"/>
+  <text x="800" y="663" text-anchor="middle" class="component-title">CONCURRENT TASK QUEUE</text>
+  <line x1="695" y1="679" x2="905" y2="679" class="divider"/>
+  <text x="695" y="703" class="text">Bounded circular FIFO</text>
+  <text x="695" y="725" class="text">Mutex • not_empty • not_full</text>
+  <text x="695" y="747" class="text">Stores borrowed Task pointers</text>
+
+  <rect x="1005" y="650" width="250" height="115" rx="4" class="primary"/>
+  <text x="1130" y="678" text-anchor="middle" class="component-title">FIXED WORKER POOL</text>
+  <line x1="1025" y1="694" x2="1235" y2="694" class="divider"/>
+  <text x="1025" y="718" class="text">Worker 0 … Worker N−1</text>
+  <text x="1025" y="740" class="text">Block • dequeue • execute • repeat</text>
+
+  <!-- Runtime flow -->
+  <line x1="800" y1="605" x2="800" y2="635" class="flow"/>
+  <text x="818" y="624" class="small">enqueue</text>
+
+  <line x1="925" y1="708" x2="1005" y2="708" class="flow"/>
+  <text x="965" y="697" text-anchor="middle" class="small">FIFO Task *</text>
+
+  <line x1="675" y1="735" x2="595" y2="735" class="support"/>
+  <text x="635" y="723" text-anchor="middle" class="small">borrowed pointer</text>
+
+  <line x1="925" y1="565" x2="1005" y2="565" class="support"/>
+  <text x="965" y="553" text-anchor="middle" class="small">events</text>
+
+  <!-- Callback -->
+  <rect x="1340" y="615" width="220" height="145" rx="5" class="primary"/>
+  <text x="1450" y="644" text-anchor="middle" class="component-title">CALLER CALLBACK</text>
+  <line x1="1360" y1="660" x2="1540" y2="660" class="divider"/>
+  <text x="1360" y="686" class="text">execute(Task *, context)</text>
+  <text x="1360" y="710" class="text">Returns success or failure</text>
+  <text x="1360" y="734" class="small">Runs outside internal locks</text>
+
+  <line x1="1255" y1="708" x2="1340" y2="708" class="flow"/>
+  <text x="1298" y="697" text-anchor="middle" class="small">invoke</text>
+
+  <line x1="1340" y1="742" x2="1255" y2="742" class="support"/>
+  <text x="1298" y="760" text-anchor="middle" class="small">result</text>
+
+  <!-- Diagnostics -->
+  <rect x="30" y="410" width="220" height="390" rx="5" class="internal"/>
+  <text x="140" y="442" text-anchor="middle" class="component-title">PRIVATE DIAGNOSTICS</text>
+  <line x1="50" y1="460" x2="230" y2="460" class="divider"/>
+  <text x="52" y="491" class="text">• Runtime snapshots</text>
+  <text x="52" y="518" class="text">• Invariant validation</text>
+  <text x="52" y="545" class="text">• Fault injection</text>
+  <text x="52" y="572" class="text">• Contention profiling</text>
+  <text x="52" y="599" class="text">• Benchmark harness</text>
+  <text x="52" y="626" class="text">• Test suites</text>
+  <text x="52" y="670" class="small">Fault injection and profiling</text>
+  <text x="52" y="688" class="small">are compile-time gated.</text>
+  <line x1="250" y1="565" x2="300" y2="565" class="support"/>
+  <text x="275" y="553" text-anchor="middle" class="small">observe</text>
+
+  <!-- Platform layer -->
+  <line x1="470" y1="800" x2="470" y2="855" class="flow"/>
+  <line x1="800" y1="800" x2="800" y2="855" class="flow"/>
+  <line x1="1130" y1="800" x2="1130" y2="855" class="flow"/>
+
+  <rect x="300" y="855" width="1000" height="85" rx="5" class="primary"/>
+  <text x="800" y="885" text-anchor="middle" class="layer-title">PLATFORM SYNCHRONIZATION INTERFACE</text>
+  <line x1="330" y1="900" x2="1270" y2="900" class="divider"/>
+  <text x="800" y="925" text-anchor="middle" class="text">
+    SchedMutex • SchedCondition • SchedThread
+  </text>
+
+  <line x1="800" y1="940" x2="800" y2="975" class="flow"/>
+  <text x="818" y="964" class="small">implemented by</text>
+
+  <rect x="475" y="975" width="650" height="75" rx="5" class="primary"/>
+  <text x="800" y="1004" text-anchor="middle" class="layer-title">WINDOWS BACKEND</text>
+  <line x1="505" y1="1019" x2="1095" y2="1019" class="divider"/>
+  <text x="800" y="1042" text-anchor="middle" class="text">
+    Critical sections • Windows condition variables • _beginthreadex • native thread handles
+  </text>
+
+  <!-- Legend -->
+  <text x="800" y="1070" text-anchor="middle" class="small">
+    Solid box: public or runtime component   •   Dashed box: caller-owned or private diagnostic concern
+  </text>
+</svg>

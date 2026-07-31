@@ -96,6 +96,11 @@ scheduler-dependent. Queue corruption, callback corruption, arbitrary backend
 failure, random faults, thread termination, and runtime activation are not
 supported.
 
+`SCHEDULER_FAULT_WORKER_STARTUP` remains a reserved internal enum value for
+stable diagnostic naming, but fault-plan validation rejects it and no runtime
+injection site implements it. The implemented seams are exactly the three rows
+listed above.
+
 ## Cleanup and recovery guarantees
 
 Partial worker creation closes the queue and joins every created worker before

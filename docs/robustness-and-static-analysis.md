@@ -1,5 +1,11 @@
 # Robustness and Static Analysis
 
+> **Historical verification record:** This report describes the repository and
+> toolchain at commit `a896aa6`. Commit hashes, branch state, available tools,
+> and release-readiness statements below are retained as audit evidence rather
+> than descriptions of the current worktree. The current released behavior is
+> summarized in [the v1.0.0 release notes](releases/v1.0.0.md).
+
 ## 1. Executive summary
 
 Robustness and Static Analysis audited the scheduler at commit `a896aa6`. GCC 16.1's static analyzer
@@ -360,6 +366,7 @@ platform audits are complete. No public or hot-path change occurred.
 
 ## 26. Release preparation readiness
 
-Robustness and Static Analysis is ready for architectural review. Release preparation has not begun. Future
-dynamic-sanitizer work should use a compatible pre-existing environment or a
-separately approved toolchain verification step.
+At the audited commit, Robustness and Static Analysis was ready for
+architectural review and release preparation had not begun. Release v1.0.0 was
+created later. Future dynamic-sanitizer work should use a compatible
+pre-existing environment or a separately approved toolchain verification step.

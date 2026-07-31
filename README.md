@@ -1,90 +1,99 @@
 # Concurrent Task Scheduling Engine
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-![C17](https://img.shields.io/badge/C-17-blue.svg)
-![CMake](https://img.shields.io/badge/CMake-%E2%89%A53.20-064F8C.svg)
-![Platform: Windows](https://img.shields.io/badge/platform-Windows-0078D4.svg)
-[![Release: v1.0.0](https://img.shields.io/badge/release-v1.0.0-blue.svg)](docs/releases/v1.0.0.md)
 
 A C17 library for executing caller-owned tasks on a fixed-size worker pool. It
 provides a bounded FIFO queue, blocking and non-blocking submission, explicit
-lifecycle control, graceful shutdown, and deterministic runtime accounting.
-
-The public API is independent of native threading types. The current
+lifecycle control, graceful shutdown, and deterministic runtime accounting. The public API is independent of native threading types. The current
 synchronization backend targets Windows and uses critical sections, condition
 variables, and `_beginthreadex`.
 
-## Why this project?
+## Project Metrics
 
-- Make concurrent ownership and lifecycle rules explicit.
-- Preserve accepted work during graceful shutdown.
-- Separate task modeling, queue storage, scheduling, and platform code.
-- Exercise synchronization and failure paths deterministically.
-- Support reproducible, correctness-gated performance measurements.
-- Provide an installable C library with a compact public API.
+| Metric | Value |
+|---|---|
+| Language standard | C17 |
+| Normal test suites | 7 |
+| Fault-injection suite | 1 additional build-gated suite |
+| Scheduling model | Fixed worker pool with bounded FIFO dispatch |
+| Submission APIs | Blocking and non-blocking |
+| Benchmark output | Per-iteration CSV with correctness status |
+| Supported backend | Windows |
+| Build system | CMake 3.20+ |
+| Package target | `ConcurrentScheduler::concurrent_scheduler` |
 
-## Table of Contents
+## Technology Stack
 
-- [Features](#features)
-- [Architecture](#architecture)
-- [Repository Structure](#repository-structure)
-- [Build](#build)
-- [Running Tests](#running-tests)
-- [Running Benchmarks](#running-benchmarks)
-- [Performance Analysis](#performance-analysis)
-- [Documentation](#documentation)
-- [Design Principles](#design-principles)
-- [License](#license)
+| Area | Technology |
+|---|---|
+| Core implementation | ISO C17 |
+| Build and packaging | CMake, CTest, GNUInstallDirs, package config exports |
+| Synchronization abstraction | Private `SchedMutex`, `SchedCondition`, and `SchedThread` interface |
+| Windows backend | Critical sections, condition variables, `_beginthreadex` |
+| Runtime accounting | C17 atomics, mutex-protected counters, saturating arithmetic |
+| Benchmark timing | Windows high-resolution performance counter |
+| Benchmark analysis | Dependency-free Python CSV analysis |
+| Report automation | PowerShell and Python scripts |
 
-## Features
+## Project Highlights
 
-- C17 implementation with warning-enabled GCC, Clang, and MSVC builds
-- Caller-owned tasks with validated priority, lifecycle, and work accounting
-- Fixed-capacity FIFO queue with non-owning task pointers
-- Thread-safe bounded queue with blocking and non-blocking operations
-- Fixed-size worker pool with concurrent producer support
-- Explicit initialization, startup, shutdown, join, and destruction contracts
-- Graceful queue draining and deterministic worker cleanup
-- Private runtime snapshots, health derivation, and invariant validation
-- Compile-time deterministic fault injection and contention profiling
-- Correctness-gated benchmark harness with CSV output
-- Modern CMake build, installation, and package export support
-- Deterministic unit, synchronization, scheduler, and fault-injection tests
+- **Concurrent runtime:** A fixed worker pool consumes caller-owned task
+  pointers from a mutex-protected bounded circular FIFO.
+- **Backpressure:** Blocking submission waits for capacity, while non-blocking
+  submission reports a full queue immediately.
+- **Explicit lifecycle:** Initialization, worker startup, graceful shutdown,
+  joining, and destruction have separate contracts and failure behavior.
+- **Graceful draining:** Shutdown closes admission, wakes blocked operations,
+  and preserves accepted tasks for worker completion.
+- **Ownership discipline:** The scheduler owns queue and worker resources but
+  never assumes ownership of tasks or callback context.
+- **Runtime reliability:** Private snapshots, saturating counters, invariant
+  validation, and derived health describe live and quiescent state.
+- **Failure-path verification:** Compile-time fault injection deterministically
+  exercises allocation, worker-creation, and join-result failures.
+- **Performance engineering:** The benchmark harness combines controlled
+  workloads, high-resolution timing, correctness gates, CSV evidence, and
+  contention profiling.
+- **Package integration:** Installed headers, version compatibility metadata,
+  and a namespaced CMake target support reuse by other projects.
+- **Platform isolation:** Public headers contain no native Windows threading
+  types; synchronization remains behind a private backend boundary.
 
 Task priorities are metadata; scheduling remains FIFO. Scheduler-level
 cancellation is not part of the public API.
 
-## Architecture
+## Repository Structure
+
+### Folder Preview
 
 ```text
-Caller-owned Task objects
-          |
-          v
-  Producer thread(s)
-          |
-          v
-       Scheduler
-          |
-          v
-Bounded synchronized FIFO
-          |
-          v
-   Fixed worker pool
-          |
-          v
-     User callback
-          |
-          v
-Private accounting and validation
+concurrent-task-scheduling-engine/
+├── CMakeLists.txt                 Build configuration
+├── LICENSE                        MIT License
+├── README.md                      Project documentation
+│
+├── include/
+│   └── concurrent_scheduler/      Public C17 API
+│
+├── src/
+│   ├── internal/                  Private diagnostics and utilities
+│   ├── platform/
+│   │   └── windows/               Windows synchronization backend
+│   └──                            Scheduler, queue, task, and worker implementation
+│
+├── tests/                         Unit and concurrency test suites
+├── benchmarks/                    Benchmark harness and timing utilities
+├── results/                       Benchmark, profiling, and optimization results
+├── docs/
+│   ├── diagrams/                  Software architecture diagrams
+│   ├── images/                    Performance and profiling charts
+│   └── releases/                  Release documentation
+│
+├── scripts/                       Build automation and report generation
+├── tools/                         Benchmark analysis utilities
+└── cmake/                         CMake package configuration
 ```
 
-The scheduler does not own submitted tasks or callback context. Workers invoke
-callbacks without holding queue or scheduler lifecycle locks. Platform
-synchronization is isolated behind an internal interface.
-
-For details, see [Architecture](docs/architecture.md) and
-[Threading Architecture](docs/threading-architecture.md).
-
-## Repository Structure
+Build directories are generated locally and are not part of the source
+architecture.
 
 | Path | Purpose |
 |---|---|
@@ -99,6 +108,49 @@ For details, see [Architecture](docs/architecture.md) and
 | `tools/` | Standalone benchmark analysis utility |
 | `docs/` | Architecture, reliability, performance, and release documentation |
 | `cmake/` | Installed-package configuration template |
+
+## Demo
+
+The following run uses Windows, C17, CMake, and the MinGW Makefiles generator.
+
+### Software Architecture
+
+![Concurrent Task Scheduling Engine architecture](docs/diagrams/concurrent-task-scheduling-engine-software-architecture.svg)
+
+### Successful build
+
+![Successful Release build](docs/demo/build-success.png)
+
+### Application Execution
+
+![Application executable output](docs/demo/application-demo.png)
+
+### Test Suite
+
+![Seven passing test suites](docs/demo/test-results.png)
+
+### Deterministic Fault Injection
+
+![Successful fault-injection build](docs/demo/fault-injection-tests1.png)
+
+![Eight passing fault-enabled test suites](docs/demo/fault-injection-tests1.1.png)
+
+### Benchmark self-test
+
+![Successful benchmark self-test](docs/demo/benchmark-self-test.png)
+
+### Benchmark CSV
+
+![Validated benchmark CSV output](docs/demo/benchmark-csv.png)
+
+
+### Validated Benchmark
+
+![Validated benchmark execution](docs/demo/benchmark-execution.png)
+
+### Throughput vs Workers
+
+![No-op throughput by worker count](docs/images/performance/noop-throughput-by-workers.svg)
 
 ## Build
 
@@ -252,7 +304,6 @@ for measured conclusions and their scope.
   invariants, deterministic faults, and recovery
 - [Robustness and Static Analysis](docs/robustness-and-static-analysis.md) —
   compiler, static-analysis, and undefined-behavior audit
-- [v1.0.0 Release Notes](docs/releases/v1.0.0.md) — stable release summary
 
 Public API contracts are documented directly in the installed headers under
 `include/concurrent_scheduler/`.
@@ -265,6 +316,20 @@ Public API contracts are documented directly in the installed headers under
 - Platform-specific code remains behind a private synchronization boundary.
 - Profiling and fault injection are private, optional, and disabled by default.
 - Benchmarks gate reported measurements on correctness checks.
+
+## Future Work
+
+The existing platform interface can accommodate another synchronization
+backend without exposing native types through the public API. The queue and
+worker boundaries also provide controlled seams for evaluating alternative
+bounded queues, batching, per-worker queues, work stealing, or affinity
+policies. Task priority is currently metadata, so a future scheduling-policy
+implementation could consume it while preserving the present ownership and
+lifecycle contracts.
+
+Any extension should retain graceful draining, deterministic cleanup,
+correctness-gated benchmarks, and the explicit rollback criteria used by the
+current performance evaluation.
 
 ## License
 

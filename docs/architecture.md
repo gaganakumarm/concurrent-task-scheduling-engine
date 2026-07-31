@@ -144,5 +144,9 @@ fault-plan storage or checks, and normal builds contain no profiling fields.
 Neither feature changes installed headers or public scheduler semantics.
 
 The detailed concurrency model is documented in
-[threading-architecture.md](threading-architecture.md). Performance,
-reliability, robustness, and release evidence are linked from the main README.
+[threading-architecture.md](threading-architecture.md). Supporting evidence is
+available in the [benchmark plan](benchmark-plan.md),
+[performance evaluation](performance-evaluation-summary.md),
+[reliability report](reliability-report.md),
+[robustness audit](robustness-and-static-analysis.md), and
+[v1.0.0 release notes](releases/v1.0.0.md).

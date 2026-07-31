@@ -81,6 +81,7 @@ Callback-cost comparisons keep every other setting fixed.
 - `noop` performs a minimal checksum contribution under benchmark accounting.
 - `light_cpu` performs exactly 128 fixed unsigned operations per Task.
 - `medium_cpu` performs exactly 4,096 fixed unsigned operations per Task.
+- `heavy_cpu` performs exactly 65,536 fixed unsigned operations per Task.
 - `controlled_blocking` uses a benchmark mutex and condition variable. The
   first callback announces entry and waits for an explicit controller
   broadcast, creating deterministic capacity pressure without sleep or polling.
@@ -151,7 +152,18 @@ tasks_rejected, submit_duration_ns, shutdown_duration_ns, join_duration_ns,
 total_duration_ns, throughput_tasks_per_second, mean_submit_latency_ns,
 p50_submit_latency_ns, p95_submit_latency_ns, min_submit_latency_ns,
 max_submit_latency_ns, mean_end_to_end_latency_ns,
-p50_end_to_end_latency_ns, p95_end_to_end_latency_ns, correctness_passed`
+p50_end_to_end_latency_ns, p95_end_to_end_latency_ns, correctness_passed,
+snapshot_version, snapshot_consistency, snapshot_overflow, submitted_count,
+accepted_count, rejected_count, dequeued_count, callback_started_count,
+callback_succeeded_count, callback_failed_count, current_running_count,
+created_worker_count, active_worker_count, joined_worker_count,
+queue_current_size, queue_high_water_mark, validation_violations,
+validation_incomplete, derived_health`
+
+Profiling builds insert their queue-contention, signaling, occupancy, callback,
+worker-distribution, and accounting-mode columns immediately before
+`correctness_passed`. They also write `.workers.csv` and `.producers.csv`
+companion files using the schemas emitted by the benchmark executable.
 
 The process uses the C locale-independent integer syntax and fixed `.` decimal
 format emitted by the C runtime's initial locale. Generated result files are
